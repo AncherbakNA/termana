@@ -35,13 +35,16 @@ Get application packages only from this repository's
 [Releases page](https://github.com/AncherbakNA/termana/releases). Choose the package
 for your operating system and processor; release notes identify available builds.
 
-- **macOS:** extract the archive and move `Termana.app` into Applications.
+- **macOS:** extract the archive and place `Termana.app` in your own `~/Applications`.
 - **Windows:** place the executable in a directory you control and start it.
 - **Linux:** launch from source for now; no Linux desktop package is promised.
 
 Native signing and notarization status is stated for each release. Do not assume
 that a manifest signature is an Apple or Microsoft code-signing certificate.
 Do not disable operating-system security protections to run an unverified copy.
+Native RDP and SSH1 require a location other users cannot write to; the system
+`/Applications` directory can be refused if it is group-writable. Use your own
+application directory rather than changing system permissions.
 
 ## Updating
 
