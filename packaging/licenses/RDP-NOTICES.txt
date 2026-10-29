@@ -1,0 +1,16 @@
+Termana RDP component
+
+RDP transport is FreeRDP 3.32.2 with isolated OpenSSL 3.5.9 LTS.
+The component is built from the upstream sources and Termana's helper sources.
+FreeRDP and OpenSSL license texts accompany this notice in this directory.
+Termana's own helper sources are included in the application's source archive.
+
+Upstream projects:
+https://www.freerdp.com/
+https://github.com/FreeRDP/FreeRDP
+https://openssl-library.org/
+
+Only an explicitly reviewed, digest-pinned native component is included.
+The runtime does not use a FreeRDP executable from PATH or an environment override.
+Building a desktop application does not certify its platform acceptance, and
+does not imply public code signing, notarization or an automatic update service.

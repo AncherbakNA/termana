@@ -10,7 +10,7 @@ saved connections in one window.
 ## Current status
 
 Termana is in active development. Versions `0.x.y` are early releases, not a
-production-readiness guarantee. The first public release is planned as `v0.1.0`.
+production-readiness guarantee. The initial release version is `v0.1.0`.
 GitHub synchronization and automatic update installation are not available yet.
 
 ## Features
@@ -51,8 +51,9 @@ before upgrading. Active sessions do not survive quitting the application.
 Application files and personal data are stored separately; do not delete the
 data directory when replacing the application.
 
-Signed update metadata and an update-checking core are under development.
-Automatic installation is not a released feature yet.
+Use **Help → Check for updates** to verify signed release metadata and open the
+verified release page. Updates are checked only when requested. Automatic
+installation is not a released feature yet.
 
 ## Your data
 
