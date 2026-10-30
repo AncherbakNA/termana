@@ -10,8 +10,8 @@ saved connections in one window.
 ## Current status
 
 Termana is in active development. Versions `0.x.y` are early releases, not a
-production-readiness guarantee. The initial release version is `v0.1.0`.
-GitHub synchronization and automatic update installation are not available yet.
+production-readiness guarantee. Version `v0.1.1` adds encrypted GitHub session
+sync and explicit download/restart installation for supported desktop packages.
 
 ## Features
 
@@ -24,6 +24,8 @@ GitHub synchronization and automatic update installation are not available yet.
   administrative sessions and separately enabled clipboard directions.
 - Command snippets, terminal search, output saving and session logging.
 - Light and dark themes, configurable terminal fonts and toolbar buttons.
+- Encrypted personal GitHub sync, recovery keys and explicit conflict review.
+- Signed application downloads, user-confirmed restart and failed-start rollback.
 
 Telnet and optional SSH1 are legacy protocols. Use them only on trusted networks
 when a supported encrypted protocol is unavailable. SSH1 is never an automatic
@@ -48,15 +50,32 @@ application directory rather than changing system permissions.
 
 ## Updating
 
-For the current early versions, download a newer complete package from Releases,
-quit Termana normally, replace the application and reopen it. Back up configuration
-before upgrading. Active sessions do not survive quitting the application.
+For the first upgrade from `v0.1.0`, download the newer complete package from
+Releases, quit normally, replace the application and reopen it. Back up
+configuration before upgrading. Active sessions do not survive quitting.
 Application files and personal data are stored separately; do not delete the
 data directory when replacing the application.
 
-Use **Help → Check for updates** to verify signed release metadata and open the
-verified release page. Updates are checked only when requested. Automatic
-installation is not a released feature yet.
+From `v0.1.1`, use **Help → Check for updates → Download update → Restart and
+install** on supported frozen macOS/Windows packages. The publisher signature and
+package checksum are verified; the previous app and configuration backup are
+retained for failed-start rollback. Updates are checked only when requested.
+Source launches and Linux installations update manually from source.
+
+## Personal GitHub sync
+
+Create your own private sync repository and install
+[Termana Sync](https://github.com/apps/termana-sync) only on that repository.
+Use **Sessions → GitHub session sync** to sign in through GitHub's device page.
+On the first computer, connect and save the recovery key privately before syncing.
+On another computer, select the same repository and enter that recovery key.
+Choose **Sync now** to exchange edits; conflicts require an explicit choice.
+This is not periodic background synchronization. Expired authorization requires
+signing in again; a missing vault entry can be restored with the backup key.
+
+Connections, folders and colors are encrypted before upload. Passwords, private
+keys, credential bindings, host trust, logs and live sessions remain local.
+Losing every copy of the recovery key cannot be repaired by GitHub login alone.
 
 ## Your data
 

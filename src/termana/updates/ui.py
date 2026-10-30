@@ -1,4 +1,4 @@
-"""Explicit signed-update checks in a worker; no silent install or session shutdown."""
+"""Signed checks and staged installation; normal exit remains owned by MainWindow."""
 
 from datetime import UTC, datetime
 from threading import Event
@@ -56,6 +56,9 @@ class UpdateDialog(QDialog):
         checker=check_official_update,
         starter=None,
         opener=QDesktopServices.openUrl,
+        installer=None,
+        stager=None,
+        target_provider=None,
     ):
         super().__init__(parent)
         self.setObjectName("updateDialog")
@@ -65,6 +68,13 @@ class UpdateDialog(QDialog):
         self.checker = checker
         self.starter = starter or QThreadPool.globalInstance().start
         self.opener = opener
+        from termana.updates.installer import installed_target, stage_update
+
+        self.installer = installer
+        self.stager = stager or stage_update
+        self.target_provider = target_provider or installed_target
+        self.result = None
+        self.stage_job = None
         self.pending = None
         self.cancelled = Event()
         self.release_url = None
@@ -74,9 +84,8 @@ class UpdateDialog(QDialog):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         for text in (
-            "Verifies signed releases on GitHub. No connections, passwords or settings are sent.",
-            "In v0.1.0, install manually: back up configuration, quit Termana and replace the app. "
-            "Active sessions are not closed automatically.",
+            "Signed updates from GitHub. Your connection data stays local.",
+            "Download first, then restart when ready. A backup is kept. Source launches update from source.",
         ):
             label = QLabel(text, self)
             label.setTextFormat(Qt.TextFormat.PlainText)
@@ -93,14 +102,20 @@ class UpdateDialog(QDialog):
         self.check_button.setProperty("actionRole", "secondary")
         self.check_button.setAutoDefault(False)
         self.release_button = QPushButton("Download page", self)
-        self.release_button.setProperty("actionRole", "primary")
+        self.release_button.setProperty("actionRole", "secondary")
         self.release_button.setAutoDefault(False)
         self.release_button.setEnabled(False)
+        self.install_button = QPushButton("Download update", self)
+        self.install_button.setProperty("actionRole", "primary")
+        self.install_button.setAutoDefault(False)
+        self.install_button.setEnabled(False)
         buttons.addButton(self.check_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.addButton(self.release_button, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton(self.install_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.rejected.connect(self.reject)
         self.check_button.clicked.connect(self.check)
         self.release_button.clicked.connect(self.open_release)
+        self.install_button.clicked.connect(self.install)
         layout.addWidget(buttons)
 
     def check(self):
@@ -123,6 +138,10 @@ class UpdateDialog(QDialog):
         task.signals.succeeded.connect(self.completed)
         task.signals.failed.connect(self.failed)
         self.release_url = None
+        self.result = None
+        self.stage_job = None
+        self.install_button.setText("Download update")
+        self.install_button.setEnabled(False)
         self.release_button.setEnabled(False)
         self.check_button.setEnabled(False)
         self.status.setText("Checking signed release metadata…")
@@ -155,6 +174,76 @@ class UpdateDialog(QDialog):
             f"https://github.com/{REPOSITORY.identity}/releases/tag/v{result.manifest.version}"
         )
         self.release_button.setEnabled(True)
+        self.result = result
+        if result.status == "available" and self.installer is not None:
+            try:
+                self.target_provider()
+            except UpdateError as error:
+                self.install_button.setToolTip(str(error))
+            else:
+                self.install_button.setEnabled(True)
+
+    def install(self):
+        if self.pending is not None or self.result is None:
+            return
+        if self.stage_job is not None:
+            if self.installer is not None:
+                self.installer(self.stage_job)
+            return
+        try:
+            target = self.target_provider()
+        except UpdateError as error:
+            self.status.setText(str(error))
+            return
+        cancelled, stager, result = Event(), self.stager, self.result
+        self.cancelled = cancelled
+
+        def operation():
+            try:
+                return stager(result, target, cancelled)
+            except UpdateError as error:
+                return str(error)
+
+        identity = uuid4()
+        task = BackgroundOperation(identity, operation)
+        self.pending = identity, task
+        task.signals.succeeded.connect(self.staged)
+        task.signals.failed.connect(self.stage_failed)
+        self.install_button.setEnabled(False)
+        self.check_button.setEnabled(False)
+        self.status.setText(
+            "Downloading and verifying the complete application… You can cancel safely."
+        )
+        try:
+            self.starter(task)
+        except Exception:
+            self.stage_failed(identity)
+
+    @Slot(object, object)
+    def staged(self, identity, result):
+        if self.pending is None or self.pending[0] != identity:
+            return
+        self.pending = None
+        self.check_button.setEnabled(True)
+        if self.cancelled.is_set():
+            self.status.setText("Download cancelled. The installed application was not changed.")
+        elif isinstance(result, str):
+            self.status.setText(result)
+            self.install_button.setEnabled(True)
+        else:
+            self.stage_job = result
+            self.install_button.setText("Restart and install")
+            self.install_button.setEnabled(True)
+            self.status.setText(
+                "Update verified and ready. Restart and install when your sessions can be closed."
+            )
+
+    @Slot(object)
+    def stage_failed(self, identity):
+        self.staged(
+            identity,
+            "Could not prepare the update securely. The installed application was not changed.",
+        )
 
     @Slot(object)
     def failed(self, identity):

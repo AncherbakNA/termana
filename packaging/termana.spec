@@ -1,8 +1,10 @@
 import sys
+import tomllib
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 root = Path(SPECPATH).parent
+release_version = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))['project']['version']
 sys.path.insert(0, str(root / 'scripts'))
 from public_metadata import stage_metadata
 helper = Path(DISTPATH) / 'runtime' / ('termana-runtime.exe' if sys.platform == 'win32' else 'termana-runtime')
@@ -56,7 +58,8 @@ else:
     if sys.platform == 'darwin':
         app = BUNDLE(collection, name='Termana.app', bundle_identifier='org.termana.desktop',
                      info_plist={'NSHighResolutionCapable': True,
-                                 'CFBundleShortVersionString': '0.1.0'})
+                                 'CFBundleShortVersionString': release_version,
+                                 'CFBundleVersion': release_version})
         # BUNDLE signs nested Mach-O files with --deep, including DATA that its
         # analysis reclassified. Add the already-signed reviewed helper only
         # afterwards, at Apple's conventional Helpers location. Seal just the

@@ -12,12 +12,13 @@ from termana.credentials.secret_store import SecretStoreUnavailableError
 _UNAVAILABLE = "RDP sign-in storage requires an existing unlocked system keyring"
 
 
-def existing_collection_backend(backend):
+def existing_collection_backend(backend, *, purpose="RDP"):
     """Adapt only the exact backend already selected by the native allowlist."""
     base = type(backend)
     if base.__module__ != "keyring.backends.SecretService" or base.__name__ != "Keyring":
         raise SecretStoreUnavailableError("The native RDP keyring backend is not supported")
     storage = import_module("secretstorage")
+    unavailable = _UNAVAILABLE if purpose == "RDP" else "Sync storage requires an existing unlocked system keyring"
 
     class ExistingCollectionOnly(base):
         # This is a per-RDP instance policy, not a library/global monkeypatch.
@@ -30,15 +31,15 @@ def existing_collection_backend(backend):
                 # must not be used here: it implicitly creates the collection.
                 collection = storage.collection.Collection(connection)
                 if collection.is_locked():
-                    raise SecretStoreUnavailableError(_UNAVAILABLE)
+                    raise SecretStoreUnavailableError(unavailable)
                 return collection
             except Exception:
                 if connection is not None:
                     connection.close()
-                raise SecretStoreUnavailableError(_UNAVAILABLE) from None
+                raise SecretStoreUnavailableError(unavailable) from None
 
         def unlock(self, item):
             if item.is_locked():
-                raise SecretStoreUnavailableError(_UNAVAILABLE)
+                raise SecretStoreUnavailableError(unavailable)
 
     return ExistingCollectionOnly()

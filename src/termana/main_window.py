@@ -1105,6 +1105,10 @@ class MainWindow(QMainWindow):
             self, "Check for updates…", "checkUpdatesAction", self._show_update_dialog,
             status_tip="Check signed releases without closing sessions",
         )
+        self.github_sync_action = create_window_action(
+            self, "GitHub session sync…", "githubSyncAction", self._show_sync_dialog,
+            status_tip="Synchronize encrypted saved connections with a private repository",
+        )
 
         self.toggle_sidebar_action = QAction(tr("Sidebar"), self)
         self.toggle_sidebar_action.setObjectName("toggleConnectionsSidebarAction")
@@ -4790,11 +4794,67 @@ class MainWindow(QMainWindow):
         from termana.updates.ui import UpdateDialog
         dialog = getattr(self, "_update_dialog", None)
         if dialog is None:
-            dialog = self._update_dialog = UpdateDialog(self)
+            dialog = self._update_dialog = UpdateDialog(self, installer=self._request_update_install)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
         dialog.check()
+
+    def _request_update_install(self, job):
+        # Use the existing normal-close confirmation for active sessions below.
+        # No force-close, kill or bypass of pending catalog/vault/file operations.
+        self._update_install_job = job
+        self.close()
+        if not self._application_close_confirmed:
+            self._update_install_job = None
+
+    def _show_sync_dialog(self, _checked=False):
+        from termana.profile_sync.ui import SyncDialog
+
+        if (not self._connection_store_ready or self._connection_store is None
+                or self._close_waiting_for_terminals):
+            self.statusBar().showMessage("Saved connections must be loaded before synchronization.")
+            return
+        dialog = getattr(self, "_sync_dialog", None)
+        if dialog is None:
+            dialog = self._sync_dialog = SyncDialog(
+                self, store=self._connection_store, catalog=lambda: self._connection_catalog,
+                commit=self._commit_sync_catalog,
+                disconnect=self._disconnect_sync_catalog,
+                reload_catalog=self._reload_sync_catalog,
+            )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _commit_sync_catalog(self, plan, state):
+        if (self._close_waiting_for_terminals or self._connection_transfer_operation is not None
+                or not self._connection_store_ready):
+            raise ValueError("Another catalog operation is active")
+        plan.check_current(self._connection_catalog, plan.source_identities)
+        self._connection_store.save_sync(plan, state)
+        if self._connection_catalog != plan.catalog:
+            self._apply_connection_catalog(plan.catalog)
+
+    def _disconnect_sync_catalog(self):
+        if (self._close_waiting_for_terminals or self._connection_transfer_operation is not None
+                or not self._connection_store_ready):
+            raise ValueError("Another catalog operation is active")
+        self._connection_store.disconnect_sync()
+
+    def _reload_sync_catalog(self):
+        if self._close_waiting_for_terminals or self._connection_transfer_operation is not None:
+            raise ValueError("Another catalog operation is active")
+        try:
+            catalog = self._connection_store.load()
+        except ConnectionStoreError:
+            self._connection_store_ready = False
+            self.connections_sidebar.set_catalog_available(False)
+            self._update_connection_transfer_actions()
+            raise
+        self._connection_store_ready = True
+        self._apply_connection_catalog(catalog)
+        self.connections_sidebar.set_catalog_available(True)
 
     def _show_about_dialog(self, _checked: bool = False) -> None:
         """Show the application identity and required GPL legal notice."""
@@ -4857,6 +4917,14 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Keep Qt alive while terminal and known_hosts helpers stop."""
+        sync = getattr(self, "_sync_dialog", None)
+        if sync is not None and sync.pending is not None:
+            sync.reject()
+            self.statusBar().showMessage("Finishing GitHub synchronization before closing. Try closing again when it finishes.")
+            event.ignore()
+            return
+        if sync is not None:
+            sync.reject()
         if not self._close_waiting_for_terminals and not self._application_close_confirmed:
             active_terminal_count = self.terminal_workspace.active_terminal_count
             if active_terminal_count and self.isVisible():
@@ -4864,6 +4932,9 @@ class MainWindow(QMainWindow):
                     event.ignore()
                     return
             self._application_close_confirmed = True
+        update_dialog = getattr(self, "_update_dialog", None)
+        if update_dialog is not None:
+            update_dialog.reject()
         self._persist_window_layout_once()
         self._close_waiting_for_terminals = True
         if self._ssh_account_dialog is not None:
@@ -4953,6 +5024,21 @@ class MainWindow(QMainWindow):
         if self._known_hosts_updater.is_running:
             self._known_hosts_updater.cancel()
             if self._known_hosts_updater.is_running:
+                event.ignore()
+                return
+        update_job = getattr(self, "_update_install_job", None)
+        if update_job is not None:
+            try:
+                from termana.paths import application_config_directory
+                from termana.storage.configuration_backup import create_backup
+                from termana.updates.installer import launch_installer
+
+                create_backup(application_config_directory(), update_job / "configuration-backup.zip")
+                self._update_installer_process = launch_installer(update_job)
+                self._update_install_job = None
+            except Exception:
+                self._update_install_job = None
+                self.statusBar().showMessage("Update could not be handed off securely. The current app was not replaced; restart it normally and retry.")
                 event.ignore()
                 return
         super().closeEvent(event)

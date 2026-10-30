@@ -233,6 +233,8 @@ class ConnectionStore:
                 if encode_snapshot(projected) != encode_snapshot(state.base):
                     raise SyncError("The accepted remote base must match the committed catalog")
             self._assert_sync_source()
+            if state == self._sync_state and plan.catalog == self._loaded_catalog:
+                return  # Validated no-op: don't churn private backups or file generations.
             self._backup_before_sync()
             self._assert_sync_source()
             self._save(plan.catalog, state)
@@ -240,6 +242,19 @@ class ConnectionStore:
             # A failure can occur AFTER rename. Do not claim old bytes survived
             # or let an ordinary edit erase the now-unknown sync generation.
             self._write_disabled_reason = "Synchronization could not be confirmed; reload saved connections before saving"
+            raise ConnectionStoreError(self._write_disabled_reason) from None
+
+    def disconnect_sync(self):
+        """Forget this device's binding only; never delete the remote repository."""
+        if self._write_disabled_reason is not None or not self._has_loaded:
+            raise ConnectionStoreError("Reload saved connections before disconnecting sync")
+        try:
+            self._assert_sync_source()
+            self._backup_before_sync()
+            self._assert_sync_source()
+            self._save(self._loaded_catalog, None)
+        except Exception:
+            self._write_disabled_reason = "Sync disconnect could not be confirmed; reload saved connections"
             raise ConnectionStoreError(self._write_disabled_reason) from None
 
     def _assert_sync_source(self):
@@ -256,7 +271,11 @@ class ConnectionStore:
 
         if self._loaded_bytes is None:
             return
-        with PrivateDirectory(self.path.parent, writable=True) as parent:
+        # The existing DataOwnership handle already pins this parent against
+        # deletion. Reopen metadata-only with DELETE sharing; requesting another
+        # DELETE/no-delete-sharing handle conflicts with that owner on Windows.
+        # Child creation remains relative to this validated no-reparse parent.
+        with PrivateDirectory(self.path.parent) as parent:
             path = self.path.parent / "sync-backups"
             with PrivateDirectory(path, parent=parent, create=not path.exists(), writable=True) as backups:
                 name = "connections-" + uuid4().hex + ".json"

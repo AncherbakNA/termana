@@ -11,6 +11,11 @@ from termana.i18n import tr
 def main(arguments: Sequence[str] | None = None) -> int:
     """Start the desktop application from the active Python environment."""
     selected_arguments = list(sys.argv[1:] if arguments is None else arguments)
+    if selected_arguments and selected_arguments[0] == "--apply-update-job":
+        if len(selected_arguments) != 2:
+            return 2
+        from termana.updates.installer import main as apply_update
+        return apply_update(selected_arguments[1])
     from termana.credentials.askpass_helper import is_askpass_invocation
     from termana.credentials.askpass_helper import main as askpass_main
 
@@ -22,6 +27,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     from termana.build_info import version_label
 
     parser.add_argument("--version", action="version", version=version_label())
+    parser.add_argument("--update-ack", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--check-update-runtime", type=Path, help=argparse.SUPPRESS)
     parser.add_argument(
         "--ssh-engine",
         choices=("system", "embedded"),
@@ -56,6 +63,21 @@ def main(arguments: Sequence[str] | None = None) -> int:
         help="Check Embedded SSH/SFTP and System SFTP against a disposable loopback peer only.",
     )
     options = parser.parse_args(selected_arguments)
+    if options.check_update_runtime is not None:
+        if len(selected_arguments) != 2:
+            parser.error("Update runtime check is standalone")
+        from termana.updates.runtime_check import main as check_update_runtime
+        return check_update_runtime(options.check_update_runtime)
+    if options.update_ack is not None:
+        if any((options.check_rdp, options.check_runtime, options.check_transports,
+                options.ssh_engine, options.ssh_agent, options.ssh_known_hosts)):
+            parser.error("Update restart cannot be combined with other launch options")
+        from termana.updates.installer import validate_ack_job
+        try:
+            validate_ack_job(options.update_ack)
+        except Exception:
+            return 2
+        return _run_gui((), update_ack=options.update_ack)
     if options.check_rdp is not None:
         if any((options.check_runtime, options.check_transports, options.ssh_engine,
                 options.ssh_agent, options.ssh_known_hosts)):
@@ -118,6 +140,7 @@ def _run_gui(
     embedded_ssh_known_hosts: Path | None = None,
     embedded_ssh_agent_path: Path | None = None,
     ssh_engine_override: str | None = None,
+    update_ack: Path | None = None,
 ) -> int:
     """Own the application lock while the Qt desktop event loop is running."""
     from PySide6.QtCore import Qt
@@ -252,6 +275,17 @@ def _run_gui(
                     RdpTrustStore(application_config_directory()/"rdp-certificates.json"), parent=application),
             )
             window.show()
+            if update_ack is not None:
+                # Normal launches may show a read-only recovery banner with
+                # default settings. An updater must NOT treat that fallback as
+                # successful compatibility with the user's saved data.
+                if settings_load_error is not None or not window._connection_store_ready:
+                    window.close()
+                    return 2
+                from PySide6.QtCore import QTimer
+
+                from termana.updates.installer import acknowledge_startup
+                QTimer.singleShot(0, lambda: acknowledge_startup(update_ack))
             return application.exec()
     finally:
         application_lock.unlock()

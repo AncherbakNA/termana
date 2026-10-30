@@ -51,6 +51,7 @@ WINDOW_MENUS = (
             None,
             "import_connections_action",
             "export_connections_action",
+            "github_sync_action",
         ),
     ),
     (

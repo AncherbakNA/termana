@@ -11,7 +11,7 @@ desktop application. Install `packaging/requirements.txt` into a dedicated build
 environment. Stage the reviewed native RDP and SSH1 components first, then run:
 
 ```sh
-python scripts/build_desktop.py --output /absolute/new/build-directory --build-label release.0.1.0
+python scripts/build_desktop.py --output /absolute/new/build-directory --build-label release.0.1.1
 ```
 
 On Windows, use a new absolute Windows path instead. The output includes the
@@ -40,7 +40,14 @@ Helper hashes are deliberately pinned in `src/termana/terminal/legacy_ssh.py`
 and `src/termana/rdp/component.py`. A rebuilt helper may have a different hash
 because of toolchains or signing. Review and test it before explicitly updating
 the pin; a rebuild must not silently authorize a new executable. Source release
-assets identify the exact upstream archives and helper provenance for each binary.
+documentation identifies the exact upstream archives and helper provenance.
+The unchanged native versions in `v0.1.1` use the matching
+[native source archive retained with v0.1.0](https://github.com/AncherbakNA/termana/releases/download/v0.1.0/Termana-0.1.0-native-sources.zip).
+Verify these SHA-256 digests before building:
+
+- PuTTY0.85: `13fd4db2936d03b73812a7bcc2a658e4dd29cc776a56c3670a7fc6f1a0ee8af8`.
+- FreeRDP3.32.2: `e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c`.
+- OpenSSL3.5.9: `603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a`.
 
 Public update verification uses a pinned Ed25519 public key. A manifest signature
 is not Apple notarization or Microsoft Authenticode signing. Publisher private

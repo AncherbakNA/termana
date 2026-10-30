@@ -10,6 +10,7 @@ import re
 import signal
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 # Also usable through runpy from the project's read-only packaging checks.
@@ -66,6 +67,13 @@ def main(arguments=None):
     if build_version != "6.22.3":
         parser.error("Install the pinned packaging requirements in a build environment")
     root = Path(__file__).resolve().parents[1]
+    source_version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+    if metadata.version("termana") != source_version:
+        parser.error(
+            "The build environment Termana version does not match the selected source. Install that source into the isolated build environment first."
+        )
     destination = options.output.resolve()
     destination.mkdir(mode=0o700, parents=True, exist_ok=False)
     records = source_manifest(root)

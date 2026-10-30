@@ -1,5 +1,27 @@
 # Termana releases
 
+## 0.1.1
+
+- Signed package download and explicit restart/install for macOS ARM64 and
+  Windows x86-64, with configuration backup and failed-start rollback.
+- Encrypted personal GitHub connection/folder/color synchronization, Device Flow
+  login, native credential storage, recovery and explicit conflict review.
+- Windows atomic configuration publication and sync backup under application
+  ownership corrected without changing directory permissions.
+- New-version readiness refuses unsupported configuration instead of accepting
+  a default/read-only fallback as a successful update.
+- Recovery preserves device identities and merge history when vault data is lost.
+- Sync dialog buttons and fields fit larger fonts without overlapping.
+
+Upgrade from0.1.0 manually once; subsequent supported package updates can use
+Help → Check for updates. Sync is explicit Sync now, not a background scheduler.
+Native versions/pins are unchanged. macOS is ad-hoc sealed/not notarized;
+Windows is not Authenticode-signed. Linux remains source-only in this release.
+
+Downloads foreground the two application packages. Signed manifest/signature
+are the only additional uploaded assets; matching own source is in the release
+tag and the unchanged native source archive is linked from BUILD.md/release notes.
+
 ## 0.1.0
 
 First public development release. macOS ARM64 and Windows x86-64 application

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -121,7 +122,11 @@ def fetch_public_metadata(url: str, limit: int) -> bytes:
                 "Update server temporarily refused the request; retry later"
             ) from None
         raise UpdateError("Update metadata request failed") from None
-    except (URLError, OSError):
+    except (URLError, OSError) as error:
+        if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
+            raise UpdateError(
+                "GitHub's certificate could not be verified. Check your clock and system trusted certificates; TLS verification remains enabled."
+            ) from None
         raise UpdateError("Could not securely reach the update server") from None
 
 

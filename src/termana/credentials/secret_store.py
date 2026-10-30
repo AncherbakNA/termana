@@ -10,6 +10,7 @@ from uuid import UUID
 
 KEYRING_SERVICE_NAME: Final = "io.github.ancherbakna.termana.ssh-password.v1"
 RDP_KEYRING_SERVICE_NAME: Final = "io.github.ancherbakna.termana.rdp-password.v1"
+SYNC_KEYRING_SERVICE_NAME: Final = "io.github.ancherbakna.termana.sync.v1"
 MAX_SSH_PASSWORD_CHARACTERS: Final = 64 * 1024
 _SUPPORTED_BACKENDS_BY_SYSTEM: Final[dict[str, tuple[tuple[str, str], ...]]] = {
     "Darwin": (("keyring.backends.macOS", "Keyring"),),
@@ -67,7 +68,7 @@ class KeyringSecretStore:
         """Inject a validated backend or defer native backend discovery until use."""
         if backend is not None and backend_factory is not None:
             raise ValueError("Provide either a keyring backend or a backend factory")
-        if type(service_name) is not str or service_name not in (KEYRING_SERVICE_NAME, RDP_KEYRING_SERVICE_NAME):
+        if type(service_name) is not str or service_name not in (KEYRING_SERVICE_NAME, RDP_KEYRING_SERVICE_NAME, SYNC_KEYRING_SERVICE_NAME):
             raise ValueError("Only reviewed Termana credential namespaces are allowed")
         self._service_name = service_name
         if backend is not None:
