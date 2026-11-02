@@ -4,6 +4,12 @@ Use Python 3.12 or later in a private, isolated virtual environment. Install the
 project with `python -m pip install -e '.[dev]'`, then run `python -m termana`.
 No personal settings, credentials, host trust or connection files belong in source.
 
+Development outputs stay inside the checkout: `build/` holds native components
+and build work, while `dist/` holds exports and packages. Run scripts from the
+repository root and supply absolute paths to new output directories when requested.
+The source RDP helper is selected under `build/` using the reviewed platform plan
+in `src/termana/rdp/component.py`; path and hash checks remain mandatory.
+
 ## Native desktop packages
 
 Build on the target operating system; PyInstaller does not cross-compile the
@@ -11,7 +17,7 @@ desktop application. Install `packaging/requirements.txt` into a dedicated build
 environment. Stage the reviewed native RDP and SSH1 components first, then run:
 
 ```sh
-python scripts/build_desktop.py --output /absolute/new/build-directory --build-label release.0.1.1
+python scripts/build_desktop.py --output /absolute/new/build-directory --build-label release.0.1.2
 ```
 
 On Windows, use a new absolute Windows path instead. The output includes the
@@ -36,12 +42,12 @@ For SSH1, run the build as a module from the source root:
 python -m scripts.build_ssh1_helper --archive /absolute/putty-0.85.tar.gz --output /absolute/new/ssh1-build --cmake /absolute/path/to/cmake --frontend
 ```
 
-Helper hashes are deliberately pinned in `src/termana/terminal/legacy_ssh.py`
+Helper hashes are deliberately pinned in `src/termana/ssh/legacy_ssh.py`
 and `src/termana/rdp/component.py`. A rebuilt helper may have a different hash
 because of toolchains or signing. Review and test it before explicitly updating
 the pin; a rebuild must not silently authorize a new executable. Source release
 documentation identifies the exact upstream archives and helper provenance.
-The unchanged native versions in `v0.1.1` use the matching
+The unchanged native versions in `v0.1.2` use the matching
 [native source archive retained with v0.1.0](https://github.com/AncherbakNA/termana/releases/download/v0.1.0/Termana-0.1.0-native-sources.zip).
 Verify these SHA-256 digests before building:
 

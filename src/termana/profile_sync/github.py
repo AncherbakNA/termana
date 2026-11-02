@@ -14,8 +14,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from termana.profile_sync.crypto import MAX_ENVELOPE_BYTES
+from termana.https import system_https_handler
 from termana.profile_sync.model import SyncError, canonical_json, parse_json
+from termana.profile_sync.wire import MAX_CATALOG_BYTES as MAX_ENVELOPE_BYTES
 from termana.updates.manifest import ReleaseRepository
 
 CLIENT_ID = "Iv23liuzdGYq4RNEbbFJ"
@@ -49,7 +50,7 @@ def request_json(method, path, data=None, *, token=None, oauth=False, missing=Fa
         body = None if data is None else canonical_json(data)
         headers.update({"Content-Type": "application/json", "X-GitHub-Api-Version": "2026-03-10"})
     try:
-        with build_opener(_NoRedirect()).open(
+        with build_opener(_NoRedirect(), system_https_handler()).open(
             Request(origin + path, data=body, headers=headers, method=method), timeout=15
         ) as response:
             raw = response.read(MAX_RESPONSE + 1)
@@ -61,12 +62,18 @@ def request_json(method, path, data=None, *, token=None, oauth=False, missing=Fa
         error.close()
         if code == 404 and missing:
             return None
+        if code == 404:
+            raise SyncError(
+                "GitHub could not find this resource. Check the repository name and grant Termana Sync access to it."
+            ) from None
         if code in (409, 422):
             raise RevisionConflict("Remote changed; synchronize again") from None
         if code == 401:
             raise SyncError("GitHub authorization expired; sign in again") from None
         if code in (403, 429):
-            raise SyncError("GitHub refused access or rate-limited sync; retry later") from None
+            raise SyncError(
+                "GitHub refused access or rate-limited sync. Check Termana Sync repository access, then retry later."
+            ) from None
         raise SyncError("GitHub request failed; no local connections were replaced") from None
     except SyncError:
         raise

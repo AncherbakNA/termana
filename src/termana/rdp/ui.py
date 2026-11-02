@@ -2,9 +2,9 @@
 
 from PySide6.QtWidgets import QMessageBox
 
-from termana.i18n import tr
 from termana.models.connection import ConnectionProtocol
 from termana.rdp.component import verified_component
+from termana.ui.i18n import tr
 
 
 def rdp_component_error() -> str | None:

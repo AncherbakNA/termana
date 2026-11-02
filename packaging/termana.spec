@@ -33,7 +33,7 @@ if (legacy_native / legacy_name).is_file():
     if sys.platform != 'darwin':
         datas += [(str(legacy_native / legacy_name), 'termana/legacy_helpers/' + legacy_native.name)]
     datas += [(str(legacy_area / 'PuTTY-LICENCE.txt'), 'termana/legacy_helpers')]
-for package in ('termana', 'asyncssh', 'cryptography', 'bcrypt', 'cffi', 'keyring', 'pyte', 'wcwidth',
+for package in ('termana', 'asyncssh', 'cryptography', 'bcrypt', 'cffi', 'keyring', 'pyte', 'wcwidth', 'truststore',
                 'PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'typing_extensions',
                 'jaraco.classes', 'jaraco.context', 'jaraco.functools', 'more-itertools'):
     for source, target in copy_metadata(package):
@@ -70,7 +70,7 @@ else:
         from PyInstaller.utils.osx import sign_binary
         helper_directory = Path(app.name) / 'Contents' / 'Helpers'
         helper_directory.mkdir(exist_ok=False)
-        from termana.terminal.legacy_ssh import verify_legacy_frontend
+        from termana.ssh.legacy_ssh import verify_legacy_frontend
         legacy_helper = legacy_native / legacy_name
         verify_legacy_frontend(legacy_helper)
         for native_helper in (rdp_helper, legacy_helper):

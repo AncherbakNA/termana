@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from termana.https import system_https_handler
 from termana.updates.manifest import (
     MAX_MANIFEST_BYTES,
     ReleaseRepository,
@@ -70,7 +71,7 @@ def fetch_public_metadata(url: str, limit: int) -> bytes:
 
     Synchronous worker/CLI primitive, NEVER call from the GUI thread. There is
     no authentication/cookie handler and no Authorization header. TLS validation
-    uses Python's default verified HTTPS context, including on CDN redirects.
+    uses OS certificate trust and hostname verification, including on CDN redirects.
     """
     _validate_url(url)
     if type(limit) is not int or not 1 <= limit <= MAX_HTTP_METADATA_BYTES:
@@ -87,7 +88,9 @@ def fetch_public_metadata(url: str, limit: int) -> bytes:
     request = Request(url, headers=headers)
     deadline = time.monotonic() + 30
     try:
-        with build_opener(_SafeRedirects()).open(request, timeout=10) as response:
+        with build_opener(_SafeRedirects(), system_https_handler()).open(
+            request, timeout=10
+        ) as response:
             _validate_url(response.geturl())
             if response.status != 200:
                 raise UpdateError("Update server did not return metadata")

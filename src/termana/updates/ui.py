@@ -4,17 +4,19 @@ from datetime import UTC, datetime
 from threading import Event
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl, Slot
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QPushButton, QVBoxLayout
 
-from termana.build_info import application_version
-from termana.credentials.background_operation import BackgroundOperation
-from termana.paths import application_config_directory
+from termana.app.background_operation import BackgroundOperation
+from termana.app.build_info import application_version
+from termana.app.paths import application_config_directory
+from termana.ui.widgets.themed_checkbox import ThemedCheckBox
 from termana.updates.client import fetch_public_metadata
 from termana.updates.discovery import discover_update
 from termana.updates.manifest import UpdateError
 from termana.updates.official import PUBLIC_KEY, REPOSITORY, native_target
+from termana.updates.preferences import UpdatePreferencesStore
 from termana.updates.state import UpdateStateStore
 
 
@@ -48,6 +50,10 @@ def check_official_update(directory, cancelled):
 
 
 class UpdateDialog(QDialog):
+    automatic_update_available = Signal(str)
+    automatic_check_failed = Signal()
+    AUTOMATIC_INTERVAL_MS = 6 * 60 * 60 * 1000
+
     def __init__(
         self,
         parent=None,
@@ -76,6 +82,11 @@ class UpdateDialog(QDialog):
         self.result = None
         self.stage_job = None
         self.pending = None
+        self._automatic_check = False
+        self._automatic_started = False
+        self.automatic_timer = QTimer(self)
+        self.automatic_timer.setSingleShot(True)
+        self.automatic_timer.timeout.connect(self._automatic_tick)
         self.cancelled = Event()
         self.release_url = None
         layout = QVBoxLayout(self)
@@ -91,6 +102,22 @@ class UpdateDialog(QDialog):
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
             layout.addWidget(label)
+        self.automatic = ThemedCheckBox("Automatically check for updates", self)
+        self.automatic.setObjectName("automaticUpdatesCheckBox")
+        self.automatic.setToolTip(
+            "Installed apps check after startup and every 6 hours. Installation always needs your approval."
+        )
+        self.preferences = UpdatePreferencesStore(
+            self.directory or application_config_directory() / "updates"
+        )
+        try:
+            self.automatic.setChecked(self.preferences.load_automatic())
+        except UpdateError:
+            self.automatic.setChecked(False)
+            self.automatic.setEnabled(False)
+            self.automatic.setToolTip("Update preferences could not be read securely. Manual checks are still available.")
+        self.automatic.toggled.connect(self._automatic_changed)
+        layout.addWidget(self.automatic)
         layout.addStretch()
         buttons = QDialogButtonBox(self)
         close_button = QPushButton("Close", self)
@@ -118,9 +145,50 @@ class UpdateDialog(QDialog):
         self.install_button.clicked.connect(self.install)
         layout.addWidget(buttons)
 
-    def check(self):
+    def start_automatic_checks(self):
+        """Only the packaged GUI startup calls this; constructing a dialog is inert."""
+        self._automatic_started = True
+        if self.automatic.isEnabled() and self.automatic.isChecked():
+            self.automatic_timer.start(5000)
+
+    def stop_automatic_checks(self):
+        self._automatic_started = False
+        self.automatic_timer.stop()
+
+    def _automatic_changed(self, enabled):
+        try:
+            self.preferences.save_automatic(enabled)
+        except UpdateError:
+            self.automatic.blockSignals(True)
+            self.automatic.setChecked(False)
+            self.automatic.blockSignals(False)
+            self.automatic_timer.stop()
+            if self.pending is not None and self._automatic_check:
+                self.cancelled.set()
+            self.status.setText(
+                "Could not save your choice. Automatic checks are off for this run; manual checks are still available."
+            )
+            return
+        if not enabled:
+            self.automatic_timer.stop()
+            if self.pending is not None and self._automatic_check:
+                self.cancelled.set()
+        elif self._automatic_started:
+            self.automatic_timer.start(5000)
+
+    def _automatic_tick(self):
+        if not self._automatic_started or not self.automatic.isChecked():
+            return
+        if self.pending is not None or self.isVisible() or self.stage_job is not None:
+            self.automatic_timer.start(60_000)
+            return
+        self.automatic_timer.start(self.AUTOMATIC_INTERVAL_MS)
+        self.check(automatic=True)
+
+    def check(self, _checked=False, *, automatic=False):
         if self.pending is not None:
             return
+        self._automatic_check = automatic
         self.cancelled = Event()
         cancelled = self.cancelled
         directory = self.directory or application_config_directory() / "updates"
@@ -161,6 +229,8 @@ class UpdateDialog(QDialog):
             return
         if isinstance(result, str):
             self.status.setText(result)
+            if self._automatic_check:
+                self.automatic_check_failed.emit()
             return
         if result.status == "no-compatible-package":
             self.status.setText("No package is available for this operating system and processor.")
@@ -180,8 +250,11 @@ class UpdateDialog(QDialog):
                 self.target_provider()
             except UpdateError as error:
                 self.install_button.setToolTip(str(error))
+                self.status.setText(self.status.text() + "\n" + str(error))
             else:
                 self.install_button.setEnabled(True)
+        if result.status == "available" and self._automatic_check:
+            self.automatic_update_available.emit(result.manifest.version)
 
     def install(self):
         if self.pending is not None or self.result is None:

@@ -3,20 +3,23 @@
 from threading import Event
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEvent, Qt, QThreadPool, QTimer, QUrl, Slot
+from PySide6.QtGui import QDesktopServices, QPalette
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
-from termana.credentials.background_operation import ConfidentialBackgroundOperation
+from termana.app.background_operation import ConfidentialBackgroundOperation
 from termana.profile_sync.application import prepare_application
 from termana.profile_sync.conflicts import SyncConflictReport
 from termana.profile_sync.github import GitHubCatalog, begin_login, finish_login
@@ -26,10 +29,43 @@ from termana.profile_sync.service import (
     SyncSecrets,
     native_vault,
     new_binding,
+    prepare_encryption_key,
     restore_credentials,
     synchronize,
 )
+from termana.ui.dialogs.action_dialog import ActionDialog
+from termana.ui.widgets.themed_checkbox import ThemedCheckBox
 from termana.updates.manifest import ReleaseRepository, UpdateError
+
+
+class _SyncConfirmation(ActionDialog):
+    """Keep deferred wrapped text above the footer, including native captions."""
+
+    def event(self, event):
+        result = super().event(event)
+        if (
+            event.type() in (QEvent.Type.Show, QEvent.Type.LayoutRequest, QEvent.Type.Resize)
+            and self.isVisible()
+            and hasattr(self, "body_label")
+            and not getattr(self, "_height_pending", False)
+        ):
+            self._height_pending = True
+            QTimer.singleShot(0, self, self._fit_height)
+        return result
+
+    def _fit_height(self):
+        self._height_pending = False
+        layout = self.layout()
+        layout.activate()
+        required = max(self.minimumHeight(), layout.totalHeightForWidth(self.width()))
+        button_top = min(
+            self.primary_button.geometry().top(), self.secondary_button.geometry().top()
+        )
+        missing = self.body_label.geometry().bottom() + layout.spacing() + 1 - button_top
+        if missing > 0:
+            required = max(required, self.height() + missing)
+        if required > self.minimumHeight():
+            self.setMinimumHeight(required)
 
 
 class SyncDialog(QDialog):
@@ -62,23 +98,31 @@ class SyncDialog(QDialog):
         self.pending, self.cancelled, self._token = None, Event(), None
         self._close_requested = False
         self._conflict = None
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setSpacing(12)
+        body = QWidget(self)
+        body.setObjectName("githubSyncBody")
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.setSpacing(12)
         hint = QLabel(
-            "Encrypted sync of connections, folders and colors. Passwords, keys and host trust stay local.",
+            "Sync connections, folders and colors. Passwords, keys and host trust stay local.",
             self,
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
-        access = QLabel(
-            '<a href="https://github.com/apps/termana-sync/installations/new">Set up GitHub access</a> — select only your private sync repository.',
-            self,
-        )
+        access = self.access_link = QLabel(self)
         access.setWordWrap(True)
         access.linkActivated.connect(
             lambda _: self.opener(QUrl("https://github.com/apps/termana-sync/installations/new"))
         )
         layout.addWidget(access)
+        self.verification_link = QLabel(self)
+        self.verification_link.setWordWrap(True)
+        self.verification_link.linkActivated.connect(self._open_verification)
+        self.verification_link.hide()
+        layout.addWidget(self.verification_link)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.repository = QLineEdit(self)
@@ -89,7 +133,16 @@ class SyncDialog(QDialog):
         form.addRow("Private repository", self.repository)
         form.addRow("Recovery key", self.recovery)
         layout.addLayout(form)
-        self.saved_key = QCheckBox("Recovery key saved safely", self)
+        self.encryption = ThemedCheckBox("Encrypt synced connections", self)
+        state = self.store.sync_state
+        self.encryption.setChecked(state is None or state.encrypted)
+        self._plaintext_confirmed = state is not None and not state.encrypted
+        self.encryption.toggled.connect(self._encryption_changed)
+        layout.addWidget(self.encryption)
+        self.protection_hint = QLabel(self)
+        self.protection_hint.setWordWrap(True)
+        layout.addWidget(self.protection_hint)
+        self.saved_key = ThemedCheckBox("Recovery key saved safely", self)
         self.saved_key.setToolTip(
             "Keep a copy outside this computer. You need it to add a device or recover sync."
         )
@@ -100,6 +153,13 @@ class SyncDialog(QDialog):
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
         layout.addStretch()
+        self.body_scroll = QScrollArea(self)
+        self.body_scroll.setObjectName("githubSyncBodyScroll")
+        self.body_scroll.viewport().setObjectName("githubSyncBodyViewport")
+        self.body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setWidget(body)
+        outer.addWidget(self.body_scroll, 1)
         box = QHBoxLayout()
         box.addStretch()
         box.setSpacing(12)
@@ -108,7 +168,7 @@ class SyncDialog(QDialog):
         self.sync_button = self._button(box, "Sync now", self.sync)
         self.reload_button = self._button(box, "Reload local data", self.reload_local)
         self.sync_button.setProperty("actionRole", "primary")
-        layout.addLayout(box)
+        outer.addLayout(box)
         secondary = QHBoxLayout()
         secondary.addStretch()
         secondary.setSpacing(12)
@@ -116,7 +176,7 @@ class SyncDialog(QDialog):
         self.resolve_button = self._button(secondary, "Resolve…", self.resolve_conflict)
         self.disconnect_button = self._button(secondary, "Disconnect", self.disconnect_repository)
         self.close_button = self._button(secondary, "Close", self.reject)
-        layout.addLayout(secondary)
+        outer.addLayout(secondary)
         if self.store.sync_state is not None:
             self.repository.setText(self.store.sync_state.repository.identity)
             self.repository.setReadOnly(True)
@@ -124,7 +184,37 @@ class SyncDialog(QDialog):
             self.status.setText(
                 "Connected. Sync now to upload local edits and download remote changes."
             )
+        self.recovery.textChanged.connect(self._refresh)
+        self._fit_fields()
         self._refresh()
+
+    def _fit_fields(self):
+        # QFormLayout may retain the pre-focus one-pixel frame measurement.
+        # Reserve the two-pixel focus frame on both sides, including large fonts.
+        for field in (self.repository, self.recovery):
+            field.ensurePolished()
+            field.setMinimumHeight(field.sizeHint().height() + 4)
+        self.access_link.ensurePolished()
+        accent = self.access_link.palette().color(QPalette.ColorRole.Highlight).name()
+        # Rich-text anchors otherwise retain native navy/blue in dark themes.
+        self.access_link.setText(
+            f'<a style="color:{accent}" href="https://github.com/apps/termana-sync/installations/new">'
+            "Set up GitHub access</a> — select only your private sync repository."
+        )
+        if self.verification_link.text():
+            self.verification_link.setText(
+                f'<a style="color:{accent}" href="https://github.com/login/device">'
+                "Open GitHub sign-in</a>"
+            )
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if hasattr(self, "recovery") and event.type() in (
+            QEvent.Type.FontChange,
+            QEvent.Type.StyleChange,
+            QEvent.Type.PaletteChange,
+        ):
+            QTimer.singleShot(0, self, self._fit_fields)
 
     def _button(self, box, text, callback):
         button = QPushButton(text, self)
@@ -138,7 +228,9 @@ class SyncDialog(QDialog):
         idle, bound = self.pending is None, self.store.sync_state is not None
         self.login_button.setEnabled(idle)
         self.connect_button.setText("Recover" if bound else "Connect")
-        self.connect_button.setEnabled(idle and self._token is not None)
+        self.connect_button.setEnabled(
+            idle and (self._token is not None or (bound and bool(self.recovery.text().strip())))
+        )
         self.sync_button.setEnabled(idle and bound)
         self.reload_button.setEnabled(idle and self.reload_catalog is not None)
         self.key_button.setEnabled(idle and bound)
@@ -146,11 +238,71 @@ class SyncDialog(QDialog):
         self.disconnect_button.setEnabled(idle and bound and self.disconnect is not None)
         self.repository.setEnabled(idle and not bound)
         self.recovery.setEnabled(idle)
+        self.encryption.setEnabled(idle)
+        self.saved_key.setEnabled(idle and self.encryption.isChecked())
+        self.protection_hint.setText(
+            "Encrypted: keep your recovery key safe. Changes apply with Sync now."
+            if self.encryption.isChecked()
+            else "Not encrypted: readable JSON in your private repo. Earlier versions stay in Git history."
+        )
         self.recovery.setPlaceholderText(
             "Enter your backup key if saved credentials are missing"
             if bound
             else "Leave empty on the first computer"
         )
+
+    def _encryption_changed(self, enabled):
+        if not enabled:
+            if not self._confirm(
+                "syncPlaintextConfirmation",
+                "Turn off sync encryption?",
+                "Only synced connections will become readable.",
+                "Connection names, hosts and settings will be readable to anyone with repository access. "
+                "Turning encryption on later will not remove plaintext from Git history. "
+                "Repository editors can change the catalog. "
+                "Passwords and private keys are still excluded. Continue?",
+                "Turn off encryption",
+            ):
+                self.encryption.blockSignals(True)
+                self.encryption.setChecked(True)
+                self.encryption.blockSignals(False)
+                self._refresh()
+                return
+            self._plaintext_confirmed = True
+        elif self.store.sync_state is not None and not self.store.sync_state.encrypted:
+            self.saved_key.setChecked(False)
+        self._conflict = None
+        self._refresh()
+
+    def _confirm(self, object_name, title, subtitle, body, primary_text):
+        dialog = _SyncConfirmation(
+            object_name=object_name,
+            window_title=title,
+            title=title,
+            subtitle=subtitle,
+            body=body,
+            primary_text=primary_text,
+            primary_object_name=object_name + "Accept",
+            secondary_text="Cancel",
+            secondary_object_name=object_name + "Cancel",
+            primary_role="danger",
+            parent=self,
+        )
+        badge_size = max(44, dialog.badge_symbol.sizeHint().height() + 12)
+        dialog.badge.setFixedSize(badge_size, badge_size)
+        dialog.badge_symbol.setAccessibleName("Sync confirmation")
+        try:
+            return dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            dialog.deleteLater()
+
+    def _accepted_mode(self):
+        state = self.store.sync_state
+        mode = state is None or state.encrypted
+        self.encryption.blockSignals(True)
+        self.encryption.setChecked(mode)
+        self.encryption.blockSignals(False)
+        self._plaintext_confirmed = not mode
 
     def _start(self, kind, operation):
         if self.pending is not None:
@@ -167,7 +319,7 @@ class SyncDialog(QDialog):
             except Exception:
                 return (
                     False,
-                    "Could not complete secure sync. Local connections were not replaced; retry or sign in again.",
+                    "Could not complete sync. Local connections were not replaced; retry or sign in again.",
                 )
 
         task = ConfidentialBackgroundOperation(identity, run)
@@ -181,18 +333,42 @@ class SyncDialog(QDialog):
             self._failed(identity)
 
     def login(self):
+        self.verification_link.clear()
+        self.verification_link.hide()
         self.status.setText("Requesting GitHub sign-in code…")
         self._start("code", lambda _: self.begin())
+
+    def _open_verification(self, _link=None):
+        try:
+            opened = self.opener(QUrl("https://github.com/login/device"))
+        except Exception:
+            opened = False
+        if opened is False:
+            self.status.setText(
+                self.status.text() + "\nOpen https://github.com/login/device in your browser."
+            )
 
     def connect_repository(self):
         state = self.store.sync_state
         if state is not None:
             token, recovery = self._token, self.recovery.text().strip()
-            client, vault = self.client(state.repository, token), self.vault
+            factory, vault, mode = self.client, self.vault, self.encryption.isChecked()
+
+            def recover(_):
+                selected = (
+                    token if token is not None else SyncSecrets.load(vault, state.secret_id).token
+                )
+                return restore_credentials(
+                    state,
+                    selected,
+                    recovery,
+                    vault,
+                    factory(state.repository, selected),
+                    encrypted=mode,
+                )
+
             self.status.setText("Restoring authorization for this device…")
-            self._start(
-                "reauth", lambda _: restore_credentials(state, token, recovery, vault, client)
-            )
+            self._start("reauth", recover)
             return
         try:
             repository = ReleaseRepository.parse(self.repository.text().strip())
@@ -202,11 +378,19 @@ class SyncDialog(QDialog):
         catalog, token, recovery = self.catalog(), self._token, self.recovery.text().strip()
         self._binding_source = catalog
         client = self.client(repository, token)
+        mode = self.encryption.isChecked()
+        if not mode and not self._plaintext_confirmed:
+            return
         self.status.setText("Validating repository and saving the key in the system vault…")
         self._start(
             "connect",
             lambda _: new_binding(
-                catalog, client, SyncSecrets(token, recovery), self.vault, recovery=recovery
+                catalog,
+                client,
+                SyncSecrets(token, recovery),
+                self.vault,
+                recovery=recovery,
+                encrypted=mode,
             ),
         )
 
@@ -214,7 +398,10 @@ class SyncDialog(QDialog):
         state, catalog = self.store.sync_state, self.catalog()
         if state is None:
             return
-        if not self.saved_key.isChecked():
+        mode = self.encryption.isChecked()
+        if not mode and not self._plaintext_confirmed:
+            return
+        if mode and not self.saved_key.isChecked():
             self.status.setText(
                 "Save your recovery key first. It is needed to connect another computer or recover access."
             )
@@ -230,9 +417,10 @@ class SyncDialog(QDialog):
                 factory(state.repository, secrets.token),
                 cancelled,
                 resolution=resolution,
+                encrypted=mode if mode != state.encrypted else None,
             )
 
-        self.status.setText("Synchronizing encrypted connections…")
+        self.status.setText("Synchronizing connections…")
         self._start("sync", operation)
 
     def resolve_conflict(self):
@@ -258,23 +446,23 @@ class SyncDialog(QDialog):
             return
         state, vault = self.store.sync_state, self.vault
         if state is not None:
-            self._start("key", lambda _: SyncSecrets.load(vault, state.secret_id).recovery)
+            if self.encryption.isChecked():
+                self._start("key", lambda _: prepare_encryption_key(state, vault))
+            else:
+                self._start(
+                    "key", lambda _: (SyncSecrets.load(vault, state.secret_id).recovery, False)
+                )
 
     def disconnect_repository(self):
-        from PySide6.QtWidgets import QMessageBox
-
         state = self.store.sync_state
         if state is None or self.disconnect is None or self.pending is not None:
             return
-        if (
-            QMessageBox.question(
-                self,
-                "Disconnect sync?",
-                "Keep all local connections and the private GitHub repository, but remove this computer's saved sync credentials and key?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
+        if not self._confirm(
+            "syncDisconnectConfirmation",
+            "Disconnect sync?",
+            "Local connections and your GitHub repository will stay.",
+            "Keep all local connections and the private GitHub repository, but remove this computer's saved sync credentials and key?",
+            "Disconnect",
         ):
             return
         try:
@@ -298,6 +486,7 @@ class SyncDialog(QDialog):
             self.repository.setReadOnly(state is not None)
             if state is not None:
                 self.repository.setText(state.repository.identity)
+            self._accepted_mode()
             if previous is None or state is None or previous.secret_id != state.secret_id:
                 self.saved_key.setChecked(state is not None and state.base is not None)
             self._conflict = None
@@ -329,10 +518,17 @@ class SyncDialog(QDialog):
                 self.status.setText(result)
         elif kind == "code" and not self._close_requested:
             self.status.setText("Enter this code on GitHub: " + result.user_code)
-            self.opener(QUrl("https://github.com/login/device"))
+            self.verification_link.setText(
+                '<a href="https://github.com/login/device">Open GitHub sign-in</a>'
+            )
+            self._fit_fields()
+            self.verification_link.show()
+            self._open_verification()
             self._start("token", lambda cancelled: self.finish(result, cancelled))
             return
         elif kind == "token" and not self._close_requested:
+            self.verification_link.clear()
+            self.verification_link.hide()
             state = self.store.sync_state
             self._token = result
             if state is None:
@@ -342,10 +538,16 @@ class SyncDialog(QDialog):
                 token, vault = result, self.vault
                 factory = self.client
                 recovery = self.recovery.text().strip()
+                mode = self.encryption.isChecked()
 
                 def reauthorize(_):
                     return restore_credentials(
-                        state, token, recovery, vault, factory(state.repository, token)
+                        state,
+                        token,
+                        recovery,
+                        vault,
+                        factory(state.repository, token),
+                        encrypted=mode,
                     )
 
                 self._start("reauth", reauthorize)
@@ -365,7 +567,11 @@ class SyncDialog(QDialog):
                 self.recovery.clear()
                 self._token = None
                 self.saved_key.setChecked(False)
-                self.status.setText("Connected. Show and save the recovery key, then sync.")
+                self.status.setText(
+                    "Connected. Show and save the recovery key, then sync."
+                    if state.encrypted
+                    else "Connected without encryption. Sync now when ready."
+                )
             except Exception:
                 self.status.setText(
                     "Could not save the sync binding. Reload connections before retrying."
@@ -373,6 +579,7 @@ class SyncDialog(QDialog):
         elif kind == "sync":
             try:
                 self.commit(result.plan, result.state)
+                self._accepted_mode()
                 self._conflict = None
                 self.status.setText("Synchronized. Active sessions were not changed.")
             except Exception:
@@ -380,7 +587,14 @@ class SyncDialog(QDialog):
                     "Local connections changed or saving failed. Reload and sync again; the remote save may have completed."
                 )
         elif kind == "key" and not self._close_requested:
-            self.recovery.setText(result)
+            recovery, created = result
+            if created:
+                self.saved_key.setChecked(False)
+            if not recovery:
+                self.status.setText("Encryption is off; no recovery key is needed.")
+                self._refresh()
+                return
+            self.recovery.setText(recovery)
             self.recovery.setEchoMode(QLineEdit.EchoMode.Normal)
             self.recovery.setReadOnly(True)
             self.recovery.setEnabled(True)
@@ -394,7 +608,10 @@ class SyncDialog(QDialog):
             self.recovery.setReadOnly(False)
             self.recovery.setEchoMode(QLineEdit.EchoMode.Password)
             self.key_button.setText("Recovery key")
-            self.saved_key.setChecked(True)
+            # A newly imported key must be backed up explicitly before publishing
+            # an encrypted conversion; ordinary same-mode renewal keeps its ack.
+            if not self.encryption.isChecked() or self.store.sync_state.encrypted:
+                self.saved_key.setChecked(True)
             self.status.setText("GitHub authorization renewed. Sync now when ready.")
         elif kind == "disconnect":
             self.saved_key.setChecked(False)
@@ -403,6 +620,7 @@ class SyncDialog(QDialog):
             self.recovery.setReadOnly(False)
             self.recovery.setEchoMode(QLineEdit.EchoMode.Password)
             self._token = None
+            self._accepted_mode()
             self.status.setText(
                 "Disconnected on this computer. Local connections and GitHub data were kept."
             )
@@ -423,11 +641,14 @@ class SyncDialog(QDialog):
 
     def reject(self):
         self.cancelled.set()
+        self.verification_link.clear()
+        self.verification_link.hide()
         if self.pending is not None:
             self._close_requested = True
             self.status.setText("Finishing the current operation safely…")
             return
         self.recovery.clear()
+        self.recovery.setReadOnly(False)
         self.recovery.setEchoMode(QLineEdit.EchoMode.Password)
         self.key_button.setText("Recovery key")
         self._token = None

@@ -12,7 +12,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-from termana.build_info import packaged_build
+from termana.app.build_info import packaged_build
 from termana.storage.atomic_file import replace_file_atomically
 from termana.storage.command_snippet_store import CommandSnippetStore
 from termana.storage.connection_store import ConnectionStore

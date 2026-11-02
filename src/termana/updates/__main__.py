@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from termana.build_info import application_version
+from termana.app.build_info import application_version
 from termana.updates.client import UpdateCheckpoint
 from termana.updates.discovery import discover_update as check_for_update
 from termana.updates.manifest import ReleaseRepository, UpdateError

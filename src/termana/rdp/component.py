@@ -39,7 +39,13 @@ def bundle_directory(system, machine):
 def _selected_component_path(system, machine):
     relative, checksum = _component_spec(system, machine)
     if not getattr(sys, "frozen", False):
-        return Path(__file__).resolve().parents[3] / relative, checksum
+        project = Path(__file__).absolute().parents[3]
+        build = project / "build"
+        # Only this exact workspace alias opts into the personal artifact tree.
+        # Other links remain visible to the unchanged no-symlink verifier.
+        if build.is_symlink() and os.readlink(build) == "../artifacts/build":
+            build = project.parent / "artifacts" / "build"
+        return build / relative.relative_to("build"), checksum
     if system == "darwin":
         # Inserted after PyInstaller processing, then outer-only sealed. Do not
         # follow its Frameworks/Resources cross-links or accept re-signed bytes.
@@ -64,12 +70,12 @@ def windows_component_lease(path, checksum):
     without delete sharing instead of rejecting normal rights to create unrelated
     siblings at C:\\. Each chosen child must deny untrusted writes; no ACL repair.
     """
-    from termana.credentials.windows_private_files import private_windows_directory
-    from termana.credentials.windows_ssh_files import (
+    from termana.ssh.windows_ssh_files import (
         open_windows_ssh_file,
         validate_windows_ssh_file_path,
         windows_ssh_security_stamp,
     )
+    from termana.storage.windows_private_files import private_windows_directory
 
     validate_windows_ssh_file_path(path)  # Reject devices/UNC/streams before any open.
     with ExitStack() as leases:

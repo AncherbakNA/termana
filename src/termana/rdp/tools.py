@@ -21,9 +21,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from termana.dialog_geometry import fit_dialog_to_screen
-from termana.i18n import tr
 from termana.rdp.screenshot import save_screenshot
+from termana.ui.dialog_geometry import fit_dialog_to_screen
+from termana.ui.i18n import tr
 
 SHORTCUTS = {
     "Windows security (Ctrl+Alt+Delete)": (0x11, 0x12, 0x2E),

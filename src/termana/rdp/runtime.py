@@ -13,7 +13,8 @@ class RdpRuntimeError(ValueError):
 
 class _WindowsRuntime:
     def __init__(self, root):
-        from termana.credentials.windows_private_files import (
+        from termana.ssh.windows_ssh_files import windows_handle_security_stamp
+        from termana.storage.windows_private_files import (
             _identity,
             _open,
             _private_descriptor,
@@ -21,7 +22,6 @@ class _WindowsRuntime:
             create_windows_parent,
             private_windows_directory,
         )
-        from termana.credentials.windows_ssh_files import windows_handle_security_stamp
 
         self._stack = ExitStack()
         self._root = self._child = None
@@ -76,8 +76,8 @@ class _WindowsRuntime:
             raise RdpRuntimeError() from None
 
     def cleanup(self):
-        from termana.credentials.windows_private_files import _delete, _identity, _open, _write_api
-        from termana.credentials.windows_ssh_files import windows_handle_security_stamp
+        from termana.ssh.windows_ssh_files import windows_handle_security_stamp
+        from termana.storage.windows_private_files import _delete, _identity, _open, _write_api
 
         child, self._child = self._child, None
         if child is None:

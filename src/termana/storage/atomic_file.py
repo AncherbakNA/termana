@@ -11,8 +11,8 @@ def _publish_stage(temporary: Path, destination: Path) -> Path:
     # Reopening a DELETE-held application-data parent during MoveFileEx fails
     # with sharing violation. Reuse the reviewed same-directory NULL-root rename
     # on this exact stage handle instead of weakening the directory's sharing.
-    from termana.credentials.windows_private_files import _open, _rename, _write_api
-    from termana.credentials.windows_ssh_files import WindowsSshFileError
+    from termana.ssh.windows_ssh_files import WindowsSshFileError
+    from termana.storage.windows_private_files import _open, _rename, _write_api
 
     handle = None
     try:

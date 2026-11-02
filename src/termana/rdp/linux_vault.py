@@ -7,7 +7,7 @@ a side effect of reading/saving a sign-in. Manual RDP sign-in remains available.
 
 from importlib import import_module
 
-from termana.credentials.secret_store import SecretStoreUnavailableError
+from termana.ssh.secret_store import SecretStoreUnavailableError
 
 _UNAVAILABLE = "RDP sign-in storage requires an existing unlocked system keyring"
 

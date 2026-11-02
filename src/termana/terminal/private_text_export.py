@@ -13,8 +13,8 @@ def export_private_text_copy(target: Path, data: bytes) -> None:
     if type(data) is not bytes or len(data) > MAX_SFTP_EDIT_BYTES:
         raise ValueError("Invalid local edited copy")
     if os.name == "nt":
-        from termana.credentials.windows_private_files import write_windows_private_export
-        from termana.credentials.windows_ssh_files import WindowsSshFileError
+        from termana.ssh.windows_ssh_files import WindowsSshFileError
+        from termana.storage.windows_private_files import write_windows_private_export
 
         try:
             write_windows_private_export(target, data)

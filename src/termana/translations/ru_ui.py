@@ -567,6 +567,7 @@ ADDITIONAL_RUSSIAN = {
     "SSH secret prompt": "Запрос секрета SSH",
     "SSH server address": "Адрес SSH-сервера",
     "SSH session details": "Сведения о SSH-сеансе",
+    "SSH connection details": "Сведения о SSH-подключении",
     "SSH session ended. Reconnect and open Files again.": "SSH-сеанс завершён. Переподключитесь и снова откройте «Файлы».",
     "SSH session launch settings and verified destination facts": "Параметры запуска SSH-сеанса и проверенные сведения о назначении",
     'SSH terminal "{p0}" opened.': "Открыт SSH-терминал «{p0}».",

@@ -7,12 +7,12 @@ from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QKeyEvent, QPainter, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
-from termana.i18n import tr
 from termana.models.rdp_options import RDP_KEYBOARD_MODES
 from termana.rdp.frame import RdpFrame, ViewportTransform
 from termana.rdp.identity import RdpAttempt, validate_counter
 from termana.rdp.input import PointerAction, RdpKeyInput, RdpPointerInput, RdpReleaseAll
 from termana.terminal.tab_shortcuts import terminal_tab_action_for_key_event
+from termana.ui.i18n import tr
 
 _BUTTONS = {
     Qt.MouseButton.LeftButton: 1,

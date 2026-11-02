@@ -1,0 +1,1 @@
+"""sftp/widgets implementation area."""

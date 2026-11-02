@@ -13,6 +13,7 @@ BUILD_SCRIPTS = (
     "sign_release.py",
     "build_desktop.py",
     "public_source.py",
+    "project_paths.py",
     "build_ssh1_helper.py",
     "patch_ssh1_frontend.py",
     "ssh1_frontend.h",
@@ -82,14 +83,15 @@ def source_payloads(root):
     names.update(
         p.relative_to(root).as_posix()
         for p in (root / "src").rglob("*.py")
-        if "__pycache__" not in p.parts
+        if not {"__pycache__", ".git"}.intersection(p.relative_to(root).parts)
     )
     names.update("scripts/" + name for name in BUILD_SCRIPTS)
     names.update("native/rdp_helper/" + name for name in NATIVE_FILES)
     names.update(
         p.relative_to(root).as_posix()
         for p in (root / "packaging").rglob("*")
-        if p.is_file() and p.suffix in {".py", ".spec", ".txt"}
+        if ".git" not in p.relative_to(root).parts
+        and p.is_file() and p.suffix in {".py", ".spec", ".txt"}
     )
     names.update(OVERRIDES)
     # Keep overrides themselves so an exported checkout can run the same builder.

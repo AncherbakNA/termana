@@ -29,7 +29,7 @@ class PrivateFile:
             if os.name == "nt":
                 import msvcrt
 
-                from termana.credentials.windows_private_files import _open, _private_descriptor
+                from termana.storage.windows_private_files import _open, _private_descriptor
 
                 with _private_descriptor() as security:
                     self.handle = _open(
@@ -64,7 +64,7 @@ class PrivateFile:
         if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
             raise RecoveryError()
         if os.name == "nt":
-            from termana.credentials.windows_ssh_files import windows_handle_security_stamp
+            from termana.ssh.windows_ssh_files import windows_handle_security_stamp
 
             windows_handle_security_stamp(self.handle, private=True)
         elif status.st_uid != os.getuid() or stat.S_IMODE(status.st_mode) != 0o600:
@@ -73,7 +73,7 @@ class PrivateFile:
     @property
     def identity(self):
         if os.name == "nt":
-            from termana.credentials.windows_private_files import _identity
+            from termana.storage.windows_private_files import _identity
 
             return _identity(self.handle).hex()
         status = os.fstat(self.fd)
@@ -117,7 +117,7 @@ class PrivateFile:
     def delete(self):
         self.validate()
         if os.name == "nt":
-            from termana.credentials.windows_private_files import _delete
+            from termana.storage.windows_private_files import _delete
 
             _delete(self.handle)
         else:
@@ -134,7 +134,7 @@ class PrivateFile:
             os.close(self.fd)
             self.fd = self.handle = None
         elif self.handle is not None:
-            from termana.credentials.windows_private_files import _write_api
+            from termana.storage.windows_private_files import _write_api
 
             _write_api().CloseHandle(self.handle)
             self.handle = None
@@ -156,7 +156,7 @@ class PrivateDirectory:
             if self.borrowed:
                 self.handle = borrowed_handle
             elif os.name == "nt":
-                from termana.credentials.windows_private_files import _open, _private_descriptor
+                from termana.storage.windows_private_files import _open, _private_descriptor
 
                 with _private_descriptor() as security:
                     self.handle = _open(
@@ -186,7 +186,7 @@ class PrivateDirectory:
 
     def validate(self):
         if os.name == "nt":
-            from termana.credentials.windows_ssh_files import windows_handle_security_stamp
+            from termana.ssh.windows_ssh_files import windows_handle_security_stamp
 
             windows_handle_security_stamp(self.handle, private=True)
         else:
@@ -201,7 +201,7 @@ class PrivateDirectory:
     @property
     def identity(self):
         if os.name == "nt":
-            from termana.credentials.windows_private_files import _identity
+            from termana.storage.windows_private_files import _identity
 
             return _identity(self.handle).hex()
         status = os.fstat(self.handle)
@@ -226,7 +226,7 @@ class PrivateDirectory:
         if self.names():
             raise RecoveryError()
         if os.name == "nt":
-            from termana.credentials.windows_private_files import _delete
+            from termana.storage.windows_private_files import _delete
 
             _delete(self.handle)
         else:
@@ -240,7 +240,7 @@ class PrivateDirectory:
             if self.borrowed:
                 pass
             elif os.name == "nt":
-                from termana.credentials.windows_private_files import _write_api
+                from termana.storage.windows_private_files import _write_api
 
                 _write_api().CloseHandle(self.handle)
             else:
@@ -255,6 +255,6 @@ class PrivateDirectory:
 
 
 def security_digest(handle):
-    from termana.credentials.windows_ssh_files import windows_handle_security_stamp
+    from termana.ssh.windows_ssh_files import windows_handle_security_stamp
 
     return hashlib.sha256(windows_handle_security_stamp(handle, private=True)).hexdigest()

@@ -10,9 +10,9 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from termana.credentials.embedded_host_trust import _commit
 from termana.rdp.certificate import RdpCertificate, decode_certificate
 from termana.rdp.endpoint import RdpEndpoint
+from termana.ssh.embedded_host_trust import _commit
 from termana.storage.json_objects import reject_duplicate_json_keys
 from termana.terminal.private_recovery_files import PrivateDirectory, PrivateFile
 

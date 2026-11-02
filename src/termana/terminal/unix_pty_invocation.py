@@ -3,7 +3,7 @@
 import json
 from typing import Final
 
-from termana.helper_runtime import helper_command
+from termana.app.helper_runtime import helper_command
 from termana.terminal.command import ShellCommand
 
 _HELPER_MODULE: Final = "termana.terminal.unix_pty_child"

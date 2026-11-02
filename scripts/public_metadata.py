@@ -12,6 +12,8 @@ def stage_metadata(source, destination, *, project_readme=None):
     source, destination = Path(source), Path(destination)
     destination.mkdir(mode=0o700, parents=True, exist_ok=False)
     for path in sorted(source.rglob("*")):
+        if ".git" in path.relative_to(source).parts:
+            continue
         if path.is_symlink():
             raise ValueError("Linked package metadata refused")
         if not path.is_file() or path.name in {"direct_url.json", "RECORD", "REQUESTED"}:

@@ -50,11 +50,11 @@ class UpdateStateStore:
     def _guard_windows_directory(self):
         # Reuse the existing local-NTFS owner/DACL/no-reparse policy. Never
         # interpret mkdir(mode=0700) as a Windows ACL or repair an existing ACL.
-        from termana.credentials.windows_private_files import (
+        from termana.ssh.windows_ssh_files import WindowsSshFileError
+        from termana.storage.windows_private_files import (
             create_windows_parent,
             private_windows_directory,
         )
-        from termana.credentials.windows_ssh_files import WindowsSshFileError
 
         try:
             try:
@@ -70,10 +70,7 @@ class UpdateStateStore:
     def _open_checkpoint(self):
         if os.name != "nt":
             return os.open(self.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        from termana.credentials.windows_ssh_files import (
-            WindowsSshFileError,
-            open_windows_ssh_file,
-        )
+        from termana.ssh.windows_ssh_files import WindowsSshFileError, open_windows_ssh_file
 
         try:
             return open_windows_ssh_file(self.path)
@@ -91,10 +88,7 @@ class UpdateStateStore:
             if info.st_uid != os.getuid() or info.st_mode & 0o077:
                 raise UpdateError("Updater checkpoint must be private to its owner")
             return info.st_uid, info.st_mode
-        from termana.credentials.windows_ssh_files import (
-            WindowsSshFileError,
-            windows_ssh_security_stamp,
-        )
+        from termana.ssh.windows_ssh_files import WindowsSshFileError, windows_ssh_security_stamp
 
         try:
             return windows_ssh_security_stamp(descriptor, private=True)

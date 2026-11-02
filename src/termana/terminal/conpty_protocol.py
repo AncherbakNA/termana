@@ -94,7 +94,7 @@ def read_frame(read: Callable[[int], bytes]) -> tuple[bytes, bytes] | None:
 
 def helper_invocation() -> ShellCommand:
     """Run the helper with the active console Python and inherited private pipes."""
-    from termana.helper_runtime import helper_command
+    from termana.app.helper_runtime import helper_command
 
     return helper_command(
         "conpty", ShellCommand(sys.executable, ("-u", "-m", "termana.terminal.conpty_child"))

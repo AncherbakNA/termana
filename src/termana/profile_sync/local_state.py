@@ -31,6 +31,7 @@ class LocalSyncState:
     identities: SyncIdentities = field(repr=False)
     base: SyncSnapshot | None = field(default=None, repr=False)
     remote_sha: str | None = None
+    encrypted: bool = True
 
     def __post_init__(self):
         if (
@@ -38,6 +39,7 @@ class LocalSyncState:
             or type(self.identities) is not SyncIdentities
             or type(self.secret_id) is not UUID
             or not self.secret_id.int
+            or type(self.encrypted) is not bool
             or any(
                 type(value) is not int or not 1 <= value <= 2**53 - 1
                 for value in (self.repository_id, self.account_id)
@@ -69,7 +71,8 @@ class LocalSyncState:
 
     def document(self):
         return {
-            "version": 1,
+            "version": 2,
+            "encrypted": self.encrypted,
             "repository": self.repository.identity,
             "repository_id": self.repository_id,
             "account_id": self.account_id,
@@ -90,20 +93,23 @@ class LocalSyncState:
             if (
                 type(data) is not dict
                 or set(data)
-                != {
-                    "version",
-                    "repository",
-                    "repository_id",
-                    "account_id",
-                    "secret_id",
-                    "catalog_id",
-                    "bindings",
-                    "tombstones",
-                    "base",
-                    "remote_sha",
-                }
+                != (
+                    {
+                        "version",
+                        "repository",
+                        "repository_id",
+                        "account_id",
+                        "secret_id",
+                        "catalog_id",
+                        "bindings",
+                        "tombstones",
+                        "base",
+                        "remote_sha",
+                    }
+                    | ({"encrypted"} if data.get("version") == 2 else set())
+                )
                 or type(data["version"]) is not int
-                or data["version"] != 1
+                or data["version"] not in (1, 2)
                 or type(data["bindings"]) is not list
                 or len(data["bindings"]) > 10000
                 or type(data["tombstones"]) is not list
@@ -139,6 +145,7 @@ class LocalSyncState:
                 identities,
                 None if data["base"] is None else decode_snapshot(canonical_json(data["base"])),
                 data["remote_sha"],
+                data.get("encrypted", True),
             )
         except (ValueError, TypeError, KeyError, RecursionError, AttributeError):
             raise SyncError("Invalid local sync state") from None

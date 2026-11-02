@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
-from termana.paths import application_config_directory
+from termana.app.paths import application_config_directory
 from termana.rdp.component import WINDOWS_CLIENT_SHA256, verified_component, windows_component_lease
 from termana.rdp.endpoint import RdpEndpoint, validate_display_size
 from termana.rdp.identity import RdpAttempt

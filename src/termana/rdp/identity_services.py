@@ -4,13 +4,10 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, Qt, QThreadPool, Slot
 from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from termana.credentials.background_operation import (
-    BackgroundOperation,
-    ConfidentialBackgroundOperation,
-)
-from termana.i18n import tr
+from termana.app.background_operation import BackgroundOperation, ConfidentialBackgroundOperation
 from termana.rdp.certificate import display_fingerprint
 from termana.rdp.secret_store import RdpLogin
+from termana.ui.i18n import tr
 
 
 class RdpIdentityServices(QObject):

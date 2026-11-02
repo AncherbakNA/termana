@@ -10,8 +10,8 @@ saved connections in one window.
 ## Current status
 
 Termana is in active development. Versions `0.x.y` are early releases, not a
-production-readiness guarantee. Version `v0.1.1` adds encrypted GitHub session
-sync and explicit download/restart installation for supported desktop packages.
+production-readiness guarantee. Version `v0.1.2` adds quiet update checks,
+system HTTPS trust and a choice of encrypted or readable personal GitHub sync.
 
 ## Features
 
@@ -24,7 +24,7 @@ sync and explicit download/restart installation for supported desktop packages.
   administrative sessions and separately enabled clipboard directions.
 - Command snippets, terminal search, output saving and session logging.
 - Light and dark themes, configurable terminal fonts and toolbar buttons.
-- Encrypted personal GitHub sync, recovery keys and explicit conflict review.
+- Personal GitHub sync, encrypted by default, with recovery and conflict review.
 - Signed application downloads, user-confirmed restart and failed-start rollback.
 
 Telnet and optional SSH1 are legacy protocols. Use them only on trusted networks
@@ -59,7 +59,10 @@ data directory when replacing the application.
 From `v0.1.1`, use **Help → Check for updates → Download update → Restart and
 install** on supported frozen macOS/Windows packages. The publisher signature and
 package checksum are verified; the previous app and configuration backup are
-retained for failed-start rollback. Updates are checked only when requested.
+retained for failed-start rollback. From `v0.1.2`, packaged clients quietly check
+after startup and every six hours; this can be disabled in the update window.
+Installation always requires your action. If an older client's check or installer
+fails, download and replace the complete application manually once; keep your data.
 Source launches and Linux installations update manually from source.
 
 ## Personal GitHub sync
@@ -73,9 +76,12 @@ Choose **Sync now** to exchange edits; conflicts require an explicit choice.
 This is not periodic background synchronization. Expired authorization requires
 signing in again; a missing vault entry can be restored with the backup key.
 
-Connections, folders and colors are encrypted before upload. Passwords, private
-keys, credential bindings, host trust, logs and live sessions remain local.
-Losing every copy of the recovery key cannot be repaired by GitHub login alone.
+Connections, folders and colors are encrypted before upload by default. You can
+turn encryption off explicitly: JSON is then readable by repository readers and
+editors, and later encryption does not remove plaintext from Git history.
+Passwords, private keys, credential bindings, host trust, logs and live sessions
+remain local in both modes. Losing every recovery-key copy cannot be repaired
+by GitHub login alone for an encrypted catalog.
 
 ## Your data
 

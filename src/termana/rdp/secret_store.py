@@ -4,14 +4,14 @@ import platform
 from dataclasses import dataclass, field
 from threading import Lock
 
-from termana.credentials.secret_store import (
+from termana.models.connection import ConnectionProfile, ConnectionProtocol
+from termana.models.rdp_options import RdpOptions
+from termana.ssh.secret_store import (
     RDP_KEYRING_SERVICE_NAME,
     KeyringSecretStore,
     SecretStoreError,
     _load_platform_backend,
 )
-from termana.models.connection import ConnectionProfile, ConnectionProtocol
-from termana.models.rdp_options import RdpOptions
 from termana.storage.json_objects import reject_duplicate_json_keys
 
 

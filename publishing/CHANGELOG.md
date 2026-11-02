@@ -1,5 +1,27 @@
 # Termana releases
 
+## 0.1.2
+
+- Quiet update checks after startup and every six hours in packaged clients,
+  with a saved opt-out. Download and restart/install remain explicit actions.
+- HTTPS uses the operating system trust store; a developer's external CA file
+  is no longer required for update checks or GitHub sign-in.
+- Optional readable JSON sync alongside the encrypted default, with an explicit
+  warning about repository access and persistent plaintext in Git history.
+- GitHub sign-in has a manual browser link; recovery-key editing works again
+  after closing and reopening the sync dialog.
+- Windows data-folder ownership no longer blocks the application's own update
+  metadata checks. Directory ownership and no-reparse protections remain intact.
+- Sync confirmations keep their text and buttons separate at larger fonts on
+  macOS and Windows, with Cancel as the safe default.
+
+Mac ARM64 and Windows x86-64 packages are provided; Linux remains source-only.
+Personal sync uses explicit Sync now, not periodic background upload. Native
+helper versions and trust pins are unchanged. OS signing remains as documented.
+If an older client's updater cannot complete the first upgrade, download the
+complete package manually, quit normally and replace only the application.
+Keep the existing data directory; do not disable TLS or system security checks.
+
 ## 0.1.1
 
 - Signed package download and explicit restart/install for macOS ARM64 and

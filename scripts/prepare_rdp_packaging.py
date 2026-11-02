@@ -11,10 +11,13 @@ import sys
 import zipfile
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parents[1]
+if __package__:
+    from .project_paths import BUILD, PROJECT
+else:
+    from project_paths import BUILD, PROJECT
 sys.path.insert(0, str(PROJECT / "src"))
 
-from termana.rdp.component import _component_spec  # noqa: E402
+from termana.rdp.component import _component_spec
 
 
 def main():
@@ -22,7 +25,7 @@ def main():
     parser.add_argument("--windows-runtime", required=True, type=Path)
     args = parser.parse_args()
     relative, expected = _component_spec("win32", "AMD64")
-    target = PROJECT / relative
+    target = BUILD / relative.relative_to("build")
     with zipfile.ZipFile(args.windows_runtime) as archive:
         if set(archive.namelist()) != {target.name, "helper-manifest.json"}:
             raise ValueError("Unexpected runtime archive contents")

@@ -41,7 +41,7 @@ class RecoveryExportUnavailable(RecoveryError):
 
 
 def default_recovery_root():
-    from termana.paths import application_config_directory
+    from termana.app.paths import application_config_directory
 
     return application_config_directory() / "recovery"
 
@@ -75,7 +75,7 @@ def _registry_matches(record, directory, marker):
 
 def _validate_parent(path):
     if os.name == "nt":
-        from termana.credentials.windows_private_files import private_windows_directory
+        from termana.storage.windows_private_files import private_windows_directory
 
         with private_windows_directory(path):
             pass
@@ -167,7 +167,7 @@ class RecoveryStore:
         return OwnedRecovery(self, workspace=workspace)
 
     def create_stage(self, path, parent_handle, file_handle, *, export_authority=None):
-        from termana.credentials.windows_private_files import _identity
+        from termana.storage.windows_private_files import _identity
 
         external = {
             "parent": str(path.parent),
@@ -464,7 +464,7 @@ class RecoverySession:
 
     @staticmethod
     def _stage(owned, *, delete):
-        from termana.credentials.windows_private_files import (
+        from termana.storage.windows_private_files import (
             _delete,
             _identity,
             _open,

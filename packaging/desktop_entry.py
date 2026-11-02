@@ -3,7 +3,7 @@
 import os
 import sys
 
-from termana.app import main
+from termana.app.startup import main
 
 if __name__ == "__main__":
     # Keep argparse and fixed diagnostic messages safe without creating a console.

@@ -14,13 +14,15 @@ def main(report):
         "remote_connections": False,
         "scope": "update startup: imports, native Qt handle, pinned RDP component",
     }
-    from termana.build_info import application_version
+    from termana.app.build_info import application_version
 
     result["version"] = application_version()
     try:
-        from termana.credentials.embedded_ssh_auth import require_embedded_auth_contract
-        from termana.main_window import MainWindow  # noqa: F401
+        from termana.app.main_window import (
+            MainWindow,  # noqa: F401 - Intentional import smoke check.
+        )
         from termana.rdp.component import verified_component
+        from termana.ssh.embedded_ssh_auth import require_embedded_auth_contract
 
         require_embedded_auth_contract()
         verified_component()

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "termana"
-version = "0.1.1"
+version = "0.1.2"
 description = "A cross-platform terminal application"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,6 +16,8 @@ dependencies = [
     "keyring>=25.7,<26",
     "PySide6>=6.8.6,<7",
     "pyte>=0.8.2,<0.9",
+    # HTTPS uses OS trust, not a developer machine's external CA bundle.
+    "truststore==0.10.5",
     "wcwidth>=0.2.13,<1",
 ]
 
@@ -29,7 +31,7 @@ dev = [
 ]
 
 [project.scripts]
-termana-askpass = "termana.credentials.askpass_helper:main"
+termana-askpass = "termana.ssh.askpass_helper:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/termana"]
@@ -37,6 +39,14 @@ packages = ["src/termana"]
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
 testpaths = ["tests"]
+# tests/build is a functional area, not the generated build output. testpaths
+# already scopes discovery to tests; preserve pytest's other default exclusions.
+norecursedirs = [".*", "dist", "*.egg", "_darcs", "CVS", "node_modules", "venv", "{arch}"]
+markers = [
+    "native: requires a named native OS capability or desktop platform",
+    "live: opt-in interaction with a running approved peer",
+    "lab: requires separately authorized laboratory infrastructure",
+]
 
 [tool.ruff]
 line-length = 100

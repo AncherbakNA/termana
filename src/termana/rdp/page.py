@@ -17,8 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from termana.dialogs.action_dialog import ActionDialog
-from termana.i18n import tr
 from termana.models.connection import ConnectionProfile, ConnectionProtocol
 from termana.rdp.certificate import display_fingerprint
 from termana.rdp.clipboard import RdpClipboardBridge
@@ -30,7 +28,9 @@ from termana.rdp.identity_services import RdpIdentityServices
 from termana.rdp.surface import RdpSurface
 from termana.rdp.tools import RdpSessionTools
 from termana.rdp.view import RdpDesktopView
-from termana.widgets.wrapping_label import WrappingLabel
+from termana.ui.dialogs.action_dialog import ActionDialog
+from termana.ui.i18n import tr
+from termana.ui.widgets.wrapping_label import WrappingLabel
 
 
 class RdpPage(QWidget):

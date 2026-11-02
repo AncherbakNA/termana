@@ -6,7 +6,7 @@ import os
 from collections.abc import Sequence
 from typing import Final
 
-from termana.credentials.askpass_helper import (
+from termana.ssh.askpass_helper import (
     ASKPASS_EXPECTED_PARENT_PID_ENV,
     ASKPASS_MODE_ENV,
     ASKPASS_MODE_VALUE,

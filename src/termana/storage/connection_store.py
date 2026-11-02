@@ -44,7 +44,7 @@ from termana.storage.ssh_options_codec import (
 )
 from termana.storage.ssh_tunnels_codec import ssh_tunnels_from_document, ssh_tunnels_to_document
 
-SCHEMA_VERSION: Final = 16
+SCHEMA_VERSION: Final = 17
 MAX_CONNECTION_FILE_BYTES: Final = 4 * 1024 * 1024
 DOCUMENT_FIELDS_V1: Final = frozenset({"schema_version", "connections"})
 DOCUMENT_FIELDS_V2: Final = frozenset({"schema_version", "root_items", "folders", "connections"})
@@ -84,6 +84,7 @@ DOCUMENT_FIELDS_BY_SCHEMA: Final = MappingProxyType(
         14: DOCUMENT_FIELDS_V9,
         15: DOCUMENT_FIELDS_V9,
         16: DOCUMENT_FIELDS_V9 | {"sync_state"},
+        17: DOCUMENT_FIELDS_V9 | {"sync_state"},
     }
 )
 PROFILE_FIELDS_BY_SCHEMA: Final = MappingProxyType(
@@ -104,6 +105,7 @@ PROFILE_FIELDS_BY_SCHEMA: Final = MappingProxyType(
         14: PROFILE_FIELDS_V14,
         15: PROFILE_FIELDS_V15,
         16: PROFILE_FIELDS_V15,
+        17: PROFILE_FIELDS_V15,
     }
 )
 FOLDER_FIELDS: Final = frozenset({"id", "name", "children"})
@@ -334,6 +336,11 @@ class ConnectionStore:
         if document["schema_version"] < 16 or document["sync_state"] is None:
             return None
         try:
+            if document["schema_version"] == 16 and (
+                type(document["sync_state"]) is not dict
+                or document["sync_state"].get("version") != 1
+            ):
+                raise SyncError("Old connection schema requires its original sync metadata")
             state = LocalSyncState.from_document(document["sync_state"])
             state.validate_catalog(catalog)
             return state

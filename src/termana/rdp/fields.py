@@ -1,7 +1,7 @@
 """Readable identity fields which let QFormLayout wrap labels at large fonts."""
 from PySide6.QtWidgets import QLineEdit
 
-from termana.theme import FORM_FIELD_HORIZONTAL_PADDING
+from termana.ui.theme import FORM_FIELD_HORIZONTAL_PADDING
 
 
 class RdpIdentityLineEdit(QLineEdit):

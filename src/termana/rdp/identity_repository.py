@@ -3,9 +3,9 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
-from termana.credentials.background_operation import BackgroundOperation
-from termana.i18n import tr
+from termana.app.background_operation import BackgroundOperation
 from termana.models.connection import ConnectionProtocol
+from termana.ui.i18n import tr
 
 
 class _Completion(QObject):

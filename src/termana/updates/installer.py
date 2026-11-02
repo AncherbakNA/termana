@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from urllib.request import Request, build_opener
 from uuid import uuid4
 
+from termana.https import system_https_handler
 from termana.storage.atomic_file import replace_file_atomically
 from termana.updates.client import _SafeRedirects, _validate_url, verify_package
 from termana.updates.manifest import UpdateError, read_signed_manifest
@@ -36,7 +37,7 @@ def secure_directory(path):
     if not isinstance(path, Path) or not path.is_absolute():
         raise UpdateError("Install in a local folder owned by your account")
     if os.name == "nt":
-        from termana.credentials.windows_private_files import private_windows_directory
+        from termana.storage.windows_private_files import private_windows_directory
 
         for parent in (*reversed(path.parents), path):
             if parent != Path(path.anchor):
@@ -85,12 +86,12 @@ def installed_target():
 def download_package(manifest, artifact, destination, cancelled, *, opener=None):
     url = manifest.package_url(artifact)
     _validate_url(url)
-    opener = opener or build_opener(_SafeRedirects())
     request = Request(
         url, headers={"Accept-Encoding": "identity", "User-Agent": "Termana-Update/1"}
     )
     deadline = time.monotonic() + 900
     try:
+        opener = opener or build_opener(_SafeRedirects(), system_https_handler())
         with opener.open(request, timeout=15) as response, destination.open("xb") as output:
             os.chmod(destination, 0o600)
             _validate_url(response.geturl())
@@ -521,8 +522,8 @@ def restore_configuration_after_failed_start(job):
     configuration-backups. A busy app or ambiguous restore stops recovery rather
     than overwriting another process's settings or credentials.
     """
-    from termana.data_directory import acquire_data_ownership
-    from termana.paths import application_config_directory
+    from termana.app.data_directory import acquire_data_ownership
+    from termana.app.paths import application_config_directory
     from termana.storage.configuration_backup import apply_pending_restore, stage_restore
 
     directory = application_config_directory()
