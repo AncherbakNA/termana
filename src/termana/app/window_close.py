@@ -178,16 +178,16 @@ def closeEvent(self: MainWindow, event: QCloseEvent, *, _base_close_event) -> No
 
 
 def _confirm_application_close(self: MainWindow, active_terminal_count: int) -> bool:
-    """Ask once before an application close interrupts live terminal processes."""
+    """Ask once before closing live terminal, file, desktop or database sessions."""
     if type(active_terminal_count) is not int or active_terminal_count <= 0:
         raise ValueError("active_terminal_count must be a positive integer")
-    noun = tr("terminal") if active_terminal_count == 1 else tr("terminals")
+    noun = tr("session") if active_terminal_count == 1 else tr("sessions")
     dialog = ActionDialog(
         object_name="closeApplicationDialog",
         window_title=tr("Close Termana?"),
         title=tr("Close {p0} active {p1}?", p0=f"{active_terminal_count}", p1=f"{noun}"),
-        subtitle=tr("Active terminal sessions are still running"),
-        body=tr("Closing Termana will stop these sessions and any commands running inside them."),
+        subtitle=tr("Active sessions are still running"),
+        body=tr("Closing Termana disconnects these sessions. Running work may be interrupted and uncommitted database changes may be lost."),
         primary_text=tr("Close {p0}", p0=f"{noun}"),
         primary_object_name="confirmCloseApplicationButton",
         secondary_text=tr("Keep open"),
@@ -197,6 +197,7 @@ def _confirm_application_close(self: MainWindow, active_terminal_count: int) -> 
         badge_text="!",
         parent=self,
     )
+    dialog.badge_symbol.setAccessibleName(tr("Active sessions notice"))
     try:
         return dialog.exec() == QDialog.DialogCode.Accepted
     finally:

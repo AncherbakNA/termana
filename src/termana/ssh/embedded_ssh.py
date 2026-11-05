@@ -91,7 +91,7 @@ class EmbeddedSshPlan:
         profile = self.profile
         if (
             type(profile) is not ConnectionProfile
-            or profile.protocol is not ConnectionProtocol.SSH
+            or profile.protocol not in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
             or profile.username is None
             or profile.ssh_algorithms.protocol == "1"
             or not isinstance(self.known_hosts, Path)
@@ -344,6 +344,10 @@ class EmbeddedSshConnection:
         if self._closed or not self.authentication_live:
             raise EmbeddedSshError(EmbeddedSshFailure.CONNECTION)
         return await self._connection.start_sftp_client()
+
+    async def wait_closed(self) -> None:
+        """Observe transport termination without requesting a shell or a PTY."""
+        await self._connection.wait_closed()
 
     async def close(self) -> None:
         """Forget secrets immediately, then release channels/listeners within a bound."""

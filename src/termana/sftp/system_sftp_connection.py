@@ -267,11 +267,16 @@ class SystemSftpConnection:
                 await asyncio.wait_for(self.process.wait(), SYSTEM_SFTP_CLOSE_SECONDS)
             except (ProcessLookupError, TimeoutError):
                 if self.process.returncode is None:
-                    if os.name == "nt":
-                        self.process.kill()
-                    else:
-                        os.killpg(self.process.pid, signal.SIGKILL)
-                    await self.process.wait()
+                    try:
+                        if os.name == "nt":
+                            self.process.kill()
+                        else:
+                            os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # The group can exit before asyncio observes its child.
+                # A vanished OS process/group does not reap the asyncio child.
+                # Other signal errors still propagate instead of claiming cleanup.
+                await self.process.wait()
         await self.tasks.close()
         if self.stderr_task:
             self.stderr_task.cancel()

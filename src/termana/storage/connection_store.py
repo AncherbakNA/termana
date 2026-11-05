@@ -16,6 +16,8 @@ from termana.models.connection import (
     TelnetEncoding,
     WordDeleteMode,
 )
+from termana.models.database_options import DatabaseOptions
+from termana.models.file_options import FileOptions
 from termana.models.rdp_options import RdpOptions
 from termana.models.ssh_algorithms import (
     SshAlgorithms,
@@ -27,6 +29,11 @@ from termana.models.ssh_jump import SshJumpOptions
 from termana.models.ssh_options import SshConnectionOptions
 from termana.models.ssh_tunnels import SshTunnelOptions
 from termana.storage.atomic_file import replace_file_atomically
+from termana.storage.database_options_codec import (
+    database_options_from_document,
+    database_options_to_document,
+)
+from termana.storage.file_options_codec import file_options_from_document, file_options_to_document
 from termana.storage.json_objects import reject_duplicate_json_keys
 from termana.storage.rdp_options_codec import rdp_options_from_document, rdp_options_to_document
 from termana.storage.settings_migration_backup import (
@@ -44,7 +51,7 @@ from termana.storage.ssh_options_codec import (
 )
 from termana.storage.ssh_tunnels_codec import ssh_tunnels_from_document, ssh_tunnels_to_document
 
-SCHEMA_VERSION: Final = 17
+SCHEMA_VERSION: Final = 19
 MAX_CONNECTION_FILE_BYTES: Final = 4 * 1024 * 1024
 DOCUMENT_FIELDS_V1: Final = frozenset({"schema_version", "connections"})
 DOCUMENT_FIELDS_V2: Final = frozenset({"schema_version", "root_items", "folders", "connections"})
@@ -85,6 +92,8 @@ DOCUMENT_FIELDS_BY_SCHEMA: Final = MappingProxyType(
         15: DOCUMENT_FIELDS_V9,
         16: DOCUMENT_FIELDS_V9 | {"sync_state"},
         17: DOCUMENT_FIELDS_V9 | {"sync_state"},
+        18: DOCUMENT_FIELDS_V9 | {"sync_state"},
+        19: DOCUMENT_FIELDS_V9 | {"sync_state"},
     }
 )
 PROFILE_FIELDS_BY_SCHEMA: Final = MappingProxyType(
@@ -106,6 +115,8 @@ PROFILE_FIELDS_BY_SCHEMA: Final = MappingProxyType(
         15: PROFILE_FIELDS_V15,
         16: PROFILE_FIELDS_V15,
         17: PROFILE_FIELDS_V15,
+        18: PROFILE_FIELDS_V15 | {"file_options"},
+        19: PROFILE_FIELDS_V15 | {"file_options"},
     }
 )
 FOLDER_FIELDS: Final = frozenset({"id", "name", "children"})
@@ -355,7 +366,7 @@ class ConnectionStore:
     @staticmethod
     def _profile_to_document(profile: ConnectionProfile) -> dict[str, object]:
         """Convert a profile into JSON-compatible values."""
-        return {
+        document = {
             "id": str(profile.profile_id),
             "name": profile.name,
             "protocol": profile.protocol.value,
@@ -373,10 +384,14 @@ class ConnectionStore:
             "rdp_options": rdp_options_to_document(profile.rdp_options),
             "word_delete_mode": profile.word_delete_mode.value,
             "accent_color": profile.accent_color,
+            "file_options": file_options_to_document(profile.file_options),
             # Retained as a null compatibility field since schema v3. Session profiles
             # no longer own an SSH login name; it is selected when connecting.
             "username": None,
         }
+        if profile.protocol is ConnectionProtocol.DATABASE:
+            document["database_options"] = database_options_to_document(profile.database_options)
+        return document
 
     @staticmethod
     def _folder_to_document(folder: ConnectionFolder) -> dict[str, object]:
@@ -513,9 +528,16 @@ class ConnectionStore:
             try:
                 if not isinstance(connection, dict):
                     raise ValueError("profile must be a JSON object")
-                if set(connection) != expected_profile_fields:
+                fields = (expected_profile_fields | {"database_options"}
+                          if schema_version >= 19 and connection.get("protocol") == "database"
+                          else expected_profile_fields)
+                if set(connection) != fields:
                     raise ValueError(f"profile fields do not match schema version {schema_version}")
                 if schema_version < 12 and connection["protocol"] not in ("ssh", "telnet"):
+                    raise ValueError("Unsupported protocol in legacy connection schema")
+                if schema_version < 19 and connection["protocol"] == "database":
+                    raise ValueError("Unsupported database protocol in legacy connection schema")
+                if schema_version < 18 and connection["protocol"] not in ("ssh", "telnet", "rdp"):
                     raise ValueError("Unsupported protocol in legacy connection schema")
                 port = connection["port"]
                 if isinstance(port, bool) or not isinstance(port, int):
@@ -538,6 +560,10 @@ class ConnectionStore:
                     protocol=ConnectionProtocol(connection["protocol"]),
                     host=connection["host"],
                     accent_color=None if schema_version < 15 else connection["accent_color"],
+                    database_options=(database_options_from_document(connection["database_options"])
+                                      if "database_options" in connection else DatabaseOptions()),
+                    file_options=(FileOptions() if schema_version < 18 else
+                                  file_options_from_document(connection["file_options"])),
                     word_delete_mode=(WordDeleteMode.ESCAPE_DEL if schema_version < 14 else
                                       WordDeleteMode(connection["word_delete_mode"])),
                     rdp_options=(RdpOptions() if schema_version < 12 else

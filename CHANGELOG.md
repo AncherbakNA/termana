@@ -1,5 +1,26 @@
 # Termana releases
 
+## 0.1.3
+
+- Standalone SFTP, FTP/explicit FTPS and TFTP profiles in Sessions, with owned
+  tabs, queues, folder transfers where supported, progress and cancellation.
+- PostgreSQL, MySQL/MariaDB and SQLite profiles with a first SQL workspace,
+  object browser, bounded results and explicit Commit/Rollback. Network TLS
+  verifies certificates and hostnames; there is no silent plaintext fallback.
+- Local schema 19 and portable formats 12/13/14, with exact migration backups
+  and credential-free synchronization. SQL, results and local file bindings stay local.
+- Readable file sizes and exact-byte tooltips, consistent action buttons,
+  shorter help text and a connection form that fits short screens at large fonts.
+- System SFTP now waits for child exit even if its POSIX process group has
+  already disappeared before the asynchronous watcher observes it.
+
+The SQL client is an initial bounded workspace, not full DBeaver parity. TFTP
+has no directory listing, authentication or encryption. FTP requires explicit
+consent for plaintext; FTPS is explicit TLS, not implicit port 990.
+Update all devices before sharing catalogs with new protocol types. Old clients
+reject new formats; automatic failed-start rollback retains both configurations.
+Native code signing remains deferred; updater signatures are a separate mechanism.
+
 ## 0.1.2
 
 - Quiet update checks after startup and every six hours in packaged clients,

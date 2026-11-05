@@ -29,7 +29,7 @@ from termana.ui.widgets.wrapping_label import WrappingLabel
 MAX_COPIED_PATHS = 64
 
 
-def properties_text(owner, directory, entry):
+def properties_text(owner, directory, entry, *, protocol="SFTP"):
     """Listing snapshot, not fresh stat and not an assertion of access rights."""
     try:
         modified = (
@@ -47,8 +47,13 @@ def properties_text(owner, directory, entry):
         if entry.kind == "file" and entry.size is not None
         else tr("Unknown / not a regular file")
     )
+    template = "SSH owner: {p0}\nPath: {p1}\nType: {p2}\nBytes: {p3}\nOrdinary permissions (octal): {p4}\nModified (UTC): {p5}\n\nLoaded listing snapshot only. Refresh to request newer metadata.\nPermissions do not describe ACLs or guarantee your effective access. No symlink is followed."
+    if protocol != "SFTP":
+        template = template.replace("SSH", protocol).replace(
+            "No symlink is followed.", "FTP servers may resolve remote links; only the reported entry type is known."
+        )
     return tr(
-        "SSH owner: {p0}\nPath: {p1}\nType: {p2}\nBytes: {p3}\nOrdinary permissions (octal): {p4}\nModified (UTC): {p5}\n\nLoaded listing snapshot only. Refresh to request newer metadata.\nPermissions do not describe ACLs or guarantee your effective access. No symlink is followed.",
+        template,
         p0=f"{owner}",
         p1=f"{posixpath.join(directory, entry.name)}",
         p2=tr(entry.kind, context="file-kind"),
@@ -275,7 +280,8 @@ class SftpBrowserTools(QObject):
         display = QPlainTextEdit()
         display.setReadOnly(True)
         display.setAccessibleName(tr("Remote entry properties snapshot"))
-        display.setPlainText(properties_text(view.owner_label.text(), view._directory, entry))
+        display.setPlainText(properties_text(view.owner_label.text(), view._directory, entry,
+                                            protocol=view._protocol_name))
         layout.addWidget(display)
         close = QPushButton(tr("Close"))
         close.clicked.connect(dialog.close)

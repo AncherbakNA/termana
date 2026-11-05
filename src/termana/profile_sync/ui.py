@@ -348,6 +348,14 @@ class SyncDialog(QDialog):
                 self.status.text() + "\nOpen https://github.com/login/device in your browser."
             )
 
+    def _reveal_sign_in_code(self):
+        if self._close_requested or self.pending is None or self.pending[2] != "token":
+            return
+        # Showing the link changes the form height. Scroll only after that
+        # layout settles, without focusing a field or exposing any secret.
+        self.body_scroll.widget().layout().activate()
+        self.body_scroll.ensureWidgetVisible(self.status, 0, 12)
+
     def connect_repository(self):
         state = self.store.sync_state
         if state is not None:
@@ -525,6 +533,7 @@ class SyncDialog(QDialog):
             self.verification_link.show()
             self._open_verification()
             self._start("token", lambda cancelled: self.finish(result, cancelled))
+            QTimer.singleShot(0, self, self._reveal_sign_in_code)
             return
         elif kind == "token" and not self._close_requested:
             self.verification_link.clear()

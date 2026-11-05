@@ -18,6 +18,8 @@ from termana.models.connection import (
     WordDeleteMode,
     connection_folder_name_key,
 )
+from termana.models.database_options import DatabaseOptions
+from termana.models.file_options import FileOptions
 from termana.models.rdp_options import RdpOptions
 from termana.models.ssh_algorithms import (
     SshAlgorithms,
@@ -26,6 +28,11 @@ from termana.models.ssh_algorithms import (
 )
 from termana.models.ssh_jump import SshJumpOptions
 from termana.models.ssh_options import SshConnectionOptions
+from termana.storage.database_options_codec import (
+    database_options_from_document,
+    database_options_to_document,
+)
+from termana.storage.file_options_codec import file_options_from_document, file_options_to_document
 from termana.storage.rdp_options_codec import rdp_options_from_document, rdp_options_to_document
 from termana.storage.ssh_jump_codec import ssh_jump_from_document, ssh_jump_to_document
 from termana.storage.ssh_options_codec import (
@@ -34,14 +41,20 @@ from termana.storage.ssh_options_codec import (
 )
 
 CONNECTION_TRANSFER_FORMAT: Final = "termana-connections"
+# Existing catalogs retain their exact portable12 representation. The separate
+# file-profile extension is emitted only when a new file protocol is present.
 CONNECTION_TRANSFER_VERSION: Final = 12
-SUPPORTED_CONNECTION_TRANSFER_VERSIONS: Final[frozenset[int]] = frozenset(range(1, 13))
+FILE_CONNECTION_TRANSFER_VERSION: Final = 13
+DATABASE_CONNECTION_TRANSFER_VERSION: Final = 14
+SUPPORTED_CONNECTION_TRANSFER_VERSIONS: Final[frozenset[int]] = frozenset(range(1, 15))
 MAX_CONNECTION_TRANSFER_BYTES: Final = 4 * 1024 * 1024
 MAX_UNIQUE_ID_GENERATION_ATTEMPTS: Final = 128
 
 __all__ = (
     "CONNECTION_TRANSFER_FORMAT",
     "CONNECTION_TRANSFER_VERSION",
+    "DATABASE_CONNECTION_TRANSFER_VERSION",
+    "FILE_CONNECTION_TRANSFER_VERSION",
     "MAX_CONNECTION_TRANSFER_BYTES",
     "SUPPORTED_CONNECTION_TRANSFER_VERSIONS",
     "ConnectionTransferError",
@@ -82,6 +95,10 @@ class ConnectionTransferStats:
     folders: int
     renamed_folders: int = 0
     rdp_connections: int = 0
+    sftp_connections: int = 0
+    ftp_connections: int = 0
+    tftp_connections: int = 0
+    database_connections: int = 0
 
     def __post_init__(self) -> None:
         """Keep untrusted counts exact, non-negative, and within catalog bounds."""
@@ -91,6 +108,10 @@ class ConnectionTransferStats:
             "folders",
             "renamed_folders",
             "rdp_connections",
+            "sftp_connections",
+            "ftp_connections",
+            "tftp_connections",
+            "database_connections",
         ):
             value = getattr(self, field_name)
             if type(value) is not int:
@@ -107,7 +128,9 @@ class ConnectionTransferStats:
     @property
     def connections(self) -> int:
         """Return the total number of supported connection profiles."""
-        return self.ssh_connections + self.telnet_connections + self.rdp_connections
+        return (self.ssh_connections + self.telnet_connections + self.rdp_connections
+                + self.sftp_connections + self.ftp_connections + self.tftp_connections
+                + self.database_connections)
 
     @property
     def total_items(self) -> int:
@@ -172,6 +195,10 @@ def _stats_for_catalog(
         ),
         folders=len(catalog.folders),
         rdp_connections=sum(profile.protocol is ConnectionProtocol.RDP for profile in catalog.profiles),
+        sftp_connections=sum(p.protocol is ConnectionProtocol.SFTP for p in catalog.profiles),
+        ftp_connections=sum(p.protocol is ConnectionProtocol.FTP for p in catalog.profiles),
+        tftp_connections=sum(p.protocol is ConnectionProtocol.TFTP for p in catalog.profiles),
+        database_connections=sum(p.protocol is ConnectionProtocol.DATABASE for p in catalog.profiles),
         renamed_folders=renamed_folders,
     )
 
@@ -206,7 +233,7 @@ def _fresh_uuid(forbidden_ids: set[UUID]) -> UUID:
 
 def _connection_item_document(profile: ConnectionProfile) -> dict[str, object]:
     """Exclude credentials, IDs, local SSH identity choices, and tunnel rules."""
-    return {
+    document = {
         "type": _CONNECTION_ITEM_TYPE,
         "name": profile.name,
         "protocol": profile.protocol.value,
@@ -222,6 +249,21 @@ def _connection_item_document(profile: ConnectionProfile) -> dict[str, object]:
         "word_delete_mode": profile.word_delete_mode.value,
         "accent_color": profile.accent_color,
     }
+
+    if profile.protocol in (ConnectionProtocol.SFTP, ConnectionProtocol.FTP, ConnectionProtocol.TFTP):
+        document["file_options"] = file_options_to_document(profile.file_options)
+    if profile.protocol is ConnectionProtocol.DATABASE:
+        document["database_options"] = database_options_to_document(profile.database_options, portable=True)
+    return document
+
+
+def portable_version_for_catalog(catalog):
+    if any(p.protocol is ConnectionProtocol.DATABASE for p in catalog.profiles):
+        return DATABASE_CONNECTION_TRANSFER_VERSION
+    return (FILE_CONNECTION_TRANSFER_VERSION if any(
+        p.protocol in (ConnectionProtocol.SFTP, ConnectionProtocol.FTP, ConnectionProtocol.TFTP)
+        for p in catalog.profiles
+    ) else CONNECTION_TRANSFER_VERSION)
 
 
 def _catalog_items_document(
@@ -250,7 +292,7 @@ def encode_connection_catalog(catalog: ConnectionCatalog) -> bytes:
         raise TypeError("catalog must be a ConnectionCatalog")
     document = {
         "format": CONNECTION_TRANSFER_FORMAT,
-        "version": CONNECTION_TRANSFER_VERSION,
+        "version": portable_version_for_catalog(catalog),
         "items": _catalog_items_document(catalog, None),
     }
     try:
@@ -390,6 +432,11 @@ class _ConnectionTransferDecoder:
             10: _CONNECTION_FIELDS_V9,
             11: _CONNECTION_FIELDS_V11,
             12: _CONNECTION_FIELDS_V12,
+            13: (_CONNECTION_FIELDS_V12 | {"file_options"} if value.get("protocol") in
+                 ("sftp", "ftp", "tftp") else _CONNECTION_FIELDS_V12),
+            14: (_CONNECTION_FIELDS_V12 | {"database_options"} if value.get("protocol") == "database"
+                 else _CONNECTION_FIELDS_V12 | {"file_options"} if value.get("protocol") in
+                 ("sftp", "ftp", "tftp") else _CONNECTION_FIELDS_V12),
         }[self.version]
         if set(value) != expected_fields:
             raise ConnectionTransferError(
@@ -401,12 +448,20 @@ class _ConnectionTransferDecoder:
         try:
             if self.version < 9 and value.get("protocol") not in ("ssh", "telnet"):
                 raise ValueError("Unsupported protocol in legacy portable format")
+            if self.version < 13 and value.get("protocol") not in ("ssh", "telnet", "rdp"):
+                raise ValueError("Unsupported protocol in legacy portable format")
+            if self.version < 14 and value.get("protocol") == "database":
+                raise ValueError("Unsupported database protocol in legacy portable format")
             protocol = ConnectionProtocol(value.get("protocol"))
             profile = ConnectionProfile(
                 profile_id=_fresh_uuid(self._used_ids),
                 name=value.get("name"),
                 protocol=protocol,
                 host=value.get("host"),
+                database_options=(database_options_from_document(value["database_options"], portable=True)
+                                  if "database_options" in value else DatabaseOptions()),
+                file_options=(file_options_from_document(value["file_options"])
+                              if "file_options" in value else FileOptions()),
                 accent_color=None if self.version < 12 else value["accent_color"],
                 word_delete_mode=(WordDeleteMode.ESCAPE_DEL if self.version < 11 else
                                   WordDeleteMode(value["word_delete_mode"])),

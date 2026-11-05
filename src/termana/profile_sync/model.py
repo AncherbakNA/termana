@@ -19,6 +19,8 @@ from termana.models.connection import (
 )
 from termana.storage.connection_transfer import (
     CONNECTION_TRANSFER_VERSION,
+    DATABASE_CONNECTION_TRANSFER_VERSION,
+    FILE_CONNECTION_TRANSFER_VERSION,
     ConnectionTransferError,
     decode_connection_transfer,
     encode_connection_catalog,
@@ -135,7 +137,10 @@ class SyncRecord:
                 raise SyncError("Unsupported sync folder fields")
             _text_ids(value["children"])
         else:
-            if set(value) != _PROFILE_FIELDS or value["type"] != "connection":
+            expected = (_PROFILE_FIELDS | {"file_options"} if value.get("protocol") in
+                        ("sftp", "ftp", "tftp") else _PROFILE_FIELDS | {"database_options"}
+                        if value.get("protocol") == "database" else _PROFILE_FIELDS)
+            if set(value) != expected or value["type"] != "connection":
                 raise SyncError("Unsupported sync profile fields")
             # Ordinary portable12 exports a gateway username; sync deliberately
             # does NOT. Keep the codec's exact nullable shape, never its login.
@@ -154,6 +159,13 @@ class SyncSnapshot:
     roots: tuple[UUID, ...] = field(repr=False)
     records: tuple[SyncRecord, ...] = field(repr=False)
     tombstones: tuple[UUID, ...] = field(default=(), repr=False)
+
+    @property
+    def portable_version(self):
+        if any(r.kind == "connection" and r.document().get("protocol") == "database" for r in self.records):
+            return 14
+        return (13 if any(r.kind == "connection" and r.document().get("protocol") in
+                          ("sftp", "ftp", "tftp") for r in self.records) else 12)
 
     def __post_init__(self):
         _valid_uuid(self.catalog_id)
@@ -187,7 +199,7 @@ class SyncSnapshot:
 
         portable = {
             "format": "termana-connections",
-            "version": 12,
+            "version": self.portable_version,
             "items": [visit(item_id, 0) for item_id in self.roots],
         }
         if seen != set(records):
@@ -211,7 +223,7 @@ def encode_snapshot(snapshot: SyncSnapshot) -> bytes:
         {
             "format": "termana-profile-sync",
             "version": 1,
-            "portable_version": 12,
+            "portable_version": snapshot.portable_version,
             "catalog_id": str(snapshot.catalog_id),
             "roots": [str(item) for item in snapshot.roots],
             "records": [
@@ -244,7 +256,7 @@ def decode_snapshot(payload: bytes) -> SyncSnapshot:
         or type(data["version"]) is not int
         or data["version"] != 1
         or type(data["portable_version"]) is not int
-        or data["portable_version"] != 12
+        or data["portable_version"] not in (12, 13, 14)
     ):
         raise SyncError("Unsupported sync format version")
     raw = data["records"]
@@ -257,12 +269,16 @@ def decode_snapshot(payload: bytes) -> SyncSnapshot:
         records.append(
             SyncRecord(_uuid_from_text(item["id"]), item["kind"], canonical_json(item["data"]))
         )
-    return SyncSnapshot(
+    snapshot = SyncSnapshot(
         _uuid_from_text(data["catalog_id"]),
         _text_ids(data["roots"]),
         tuple(records),
         _text_ids(data["tombstones"], maximum=MAX_TOMBSTONES),
     )
+
+    if snapshot.portable_version != data["portable_version"]:
+        raise SyncError("Sync portable version does not match its records")
+    return snapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,7 +339,8 @@ def project_catalog(
     """
     if type(catalog) is not ConnectionCatalog or type(identities) is not SyncIdentities:
         raise SyncError("A complete catalog and local identity map are required")
-    if CONNECTION_TRANSFER_VERSION != 12:
+    if (CONNECTION_TRANSFER_VERSION != 12 or FILE_CONNECTION_TRANSFER_VERSION != 13
+            or DATABASE_CONNECTION_TRANSFER_VERSION != 14):
         raise SyncError("Portable field changes require a sync privacy review")
     try:
         portable = json.loads(encode_connection_catalog(catalog))

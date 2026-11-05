@@ -1,4 +1,4 @@
-"""An embeddable file browser owned by one authenticated SSH session."""
+"""An owned file browser; standalone FTP adapts the existing bounded message contract."""
 
 import posixpath
 from collections import deque
@@ -38,6 +38,7 @@ from termana.models.sftp_batch import (
     MAX_SFTP_BATCH_CONTEXTS,
     SftpBatchContext,
     download_batch,
+    download_selection,
     upload_batch,
     upload_selection,
 )
@@ -48,6 +49,7 @@ from termana.sftp.widgets.sftp_file_tools import SftpFileTools
 from termana.sftp.widgets.sftp_folder_transfers import SftpFolderTransfers
 from termana.sftp.widgets.sftp_places import SftpPlaces
 from termana.sftp.widgets.sftp_tools_dialog import SftpToolsDialog
+from termana.ui.file_sizes import exact_file_size_text, file_size_text
 from termana.ui.i18n import count_noun, tr
 from termana.ui.theme import DEFAULT_THEME, ThemeColors
 from termana.ui.ui_icons import interface_icon, selection_interface_icon
@@ -95,9 +97,15 @@ def _table(headers):
 class SftpBrowser(QWidget):
     transfer_changed = Signal(object)
 
-    def __init__(self, parent, backend, title):
+    def __init__(self, parent, backend, title, *, local_directory=None):
         super().__init__(parent)
         self._backend = backend
+        self._local_directory_provider = local_directory
+        self._protocol_name = getattr(backend, "file_protocol", "SFTP")
+        self._capabilities = getattr(backend, "file_capabilities", frozenset({
+            "browse", "files", "folders", "rename", "mkdir", "delete", "edit",
+        }))
+        self._delete_dialog = None
         self._closed = False
         self._session_ended = False
         self._overwrite_dialog = None
@@ -135,20 +143,23 @@ class SftpBrowser(QWidget):
         self.owner_label = ElidingLabel(file_label(title))
         self.owner_label.setObjectName("sftpOwnerLabel")
         self.owner_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.owner_label.setAccessibleName(tr("File browser SSH owner"))
+        self.owner_label.setAccessibleName(self._file_text("File browser SSH owner"))
         layout.addWidget(self.owner_label)
         connection_note = getattr(backend, "connection_note", None)
         separate_connection = connection_note is not None
         if connection_note == "SFTP · Separate System OpenSSH connection for this tab":
-            connection_note = tr("SFTP · Separate System OpenSSH connection for this tab")
+            connection_note = self._file_text("SFTP · Separate System OpenSSH connection for this tab")
         elif connection_note is None:
-            connection_note = tr("SFTP · Same verified SSH connection")
+            connection_note = self._file_text("SFTP · Same verified SSH connection")
         note = WrappingLabel(connection_note)
         note.setObjectName("sftpConnectionNote")
         note.setWordWrap(True)
         self.owner_label.setToolTip(plain_text_tooltip(file_label(title) + "\n" + connection_note))
         self.owner_label.setAccessibleDescription(file_label(title) + "\n" + connection_note)
         self.connection_badge = ElidingLabel(tr("Separate SFTP connection"))
+        if self._protocol_name != "SFTP":
+            self.owner_label.setAccessibleName(tr("File connection owner"))
+            self.connection_badge.setText(tr("Separate file connection"))
         self.connection_badge.setObjectName("sftpConnectionBadge")
         self.connection_badge.setToolTip(plain_text_tooltip(connection_note))
         self.connection_badge.setAccessibleDescription(connection_note)
@@ -182,8 +193,8 @@ class SftpBrowser(QWidget):
             button.setProperty("navigationRole", "remoteDirectory")
         self.back_button.setAccessibleName(tr("Previous remote directory"))
         self.forward_button.setAccessibleName(tr("Next remote directory"))
-        self.back_button.setToolTip(tr("Previous directory in this SSH session (Alt+Left)"))
-        self.forward_button.setToolTip(tr("Next directory in this SSH session (Alt+Right)"))
+        self.back_button.setToolTip(self._file_text("Previous directory in this SSH session (Alt+Left)"))
+        self.forward_button.setToolTip(self._file_text("Next directory in this SSH session (Alt+Right)"))
         self.up_button.setToolTip(tr("Parent directory (Alt+Up)"))
         self.refresh_button.setToolTip(tr("Refresh this directory (F5)"))
         self.tools_dialog.page_layouts["actions"].addWidget(
@@ -199,7 +210,7 @@ class SftpBrowser(QWidget):
         self.filter_input.setClearButtonEnabled(True)
         self.filter_input.setMaxLength(MAX_SFTP_PATH_CHARACTERS)
         self.filter_input.setToolTip(
-            tr("Filter only the loaded directory by name, without sending another SSH request.")
+            self._file_text("Filter only the loaded directory by name, without sending another SSH request.")
         )
         details_layout.addWidget(self.filter_input)
         self.listing_summary = ElidingLabel(tr("No directory loaded"))
@@ -212,7 +223,7 @@ class SftpBrowser(QWidget):
             )
         )
         layout.addWidget(self.listing_summary)
-        self.files = _table([tr("Name"), tr("Bytes")])
+        self.files = _table([tr("Name"), tr("Size")])
         self.files.setShowGrid(False)
         for column, alignment in enumerate(FILE_COLUMN_ALIGNMENTS):
             self.files.horizontalHeaderItem(column).setTextAlignment(alignment)
@@ -243,10 +254,10 @@ class SftpBrowser(QWidget):
         self.upload_folder_button = WrappingPushButton(tr("Upload folder…"))
         self.upload_folder_button.setAccessibleName(tr("Upload folder including subfolders"))
         self.upload_folder_button.setToolTip(
-            tr("Copy a folder tree, including empty folders. Links are excluded, never followed.")
+            self._file_text("Copy a folder tree, including empty folders. Links are excluded, never followed.")
         )
         self._folder_transfers = SftpFolderTransfers(self)
-        self.upload_many_button.setToolTip(tr("Select up to 64 regular files for this SSH folder."))
+        self.upload_many_button.setToolTip(self._file_text("Select up to 64 regular files for this SSH folder."))
         self.secondary_actions_button = QToolButton()
         self.secondary_actions_button.setText(tr("More file actions"))
         self.secondary_actions_button.setAccessibleName(tr("More remote file actions"))
@@ -274,7 +285,7 @@ class SftpBrowser(QWidget):
         self.new_folder_button = WrappingPushButton(tr("New folder…"))
         self.new_folder_button.setAccessibleName(tr("Create a remote folder"))
         self.new_folder_button.setToolTip(
-            tr("Create one folder in this SSH owner's current directory.")
+            self._file_text("Create one folder in this SSH owner's current directory.")
         )
         self.secondary_actions_layout.addWidget(
             AdaptiveButtonRow((self.copy_path_button, self.new_folder_button))
@@ -284,6 +295,11 @@ class SftpBrowser(QWidget):
         self.secondary_actions_layout.addWidget(
             AdaptiveButtonRow((self.edit_file_button, self.rename_file_button))
         )
+        self.edit_file_button.setVisible("edit" in self._capabilities)
+        if local_directory is not None:
+            self.delete_button = WrappingPushButton(tr("Delete…"))
+            self.delete_button.clicked.connect(self.delete_selection)
+            self.secondary_actions_layout.addWidget(self.delete_button)
         self._file_tools = SftpFileTools(self)
         self.edit_file_button.clicked.connect(self._file_tools.edit)
         self.rename_file_button.clicked.connect(self._file_tools.rename)
@@ -388,6 +404,19 @@ class SftpBrowser(QWidget):
         self.set_interface_colors(DEFAULT_THEME)
         self._update_buttons()
 
+    def _file_text(self, template, **values):
+        if self._protocol_name != "SFTP":
+            template = template.replace("SSH", self._protocol_name)
+            template = template.replace(
+                "Links, junctions and special entries are excluded, never followed.",
+                "Local links, junctions and special entries are excluded. Remote links are excluded when reported; FTP servers may resolve remote links.",
+            )
+            template = template.replace(
+                "Links are excluded, never followed.",
+                "Local links are excluded. Remote links are excluded when reported; FTP servers may resolve remote links.",
+            )
+        return tr(template, **values)
+
     def _toggle_secondary_actions(self, expanded):
         if expanded:
             self._show_file_tools("actions")
@@ -458,7 +487,7 @@ class SftpBrowser(QWidget):
     def _modal_context_changed(self):
         if isValid(self):
             self.status.setText(
-                tr("The SSH folder or selection changed. Choose the file action again.")
+                self._file_text("The SSH folder or selection changed. Choose the file action again.")
             )
 
     def _update_buttons(self):
@@ -477,8 +506,12 @@ class SftpBrowser(QWidget):
         )
         self.copy_path_button.setEnabled(directory_ready and entry is not None)
         regular_selected = directory_ready and entry is not None and entry.kind == "file"
-        self.edit_file_button.setEnabled(regular_selected)
-        self.rename_file_button.setEnabled(regular_selected)
+        self.edit_file_button.setEnabled(regular_selected and "edit" in self._capabilities)
+        self.rename_file_button.setEnabled(regular_selected and "rename" in self._capabilities)
+        if hasattr(self, "delete_button"):
+            self.delete_button.setEnabled(directory_ready and len(selected) == 1
+                                          and selected[0].kind in ("file", "directory")
+                                          and "delete" in self._capabilities)
         self.new_folder_button.setEnabled(directory_ready)
         self.filter_input.setEnabled(self._directory is not None and not self._closed)
         for widget in (self.path_input, self.up_button, self.refresh_button):
@@ -497,7 +530,7 @@ class SftpBrowser(QWidget):
     def _submit(self, request):
         if not self.available or not self._backend.request_sftp(request):
             self.status.setText(
-                tr(
+                self._file_text(
                     "Cannot start: SSH ended or queue is full ({p0} jobs maximum).",
                     p0=f"{MAX_SFTP_PENDING}",
                 )
@@ -686,7 +719,7 @@ class SftpBrowser(QWidget):
                 self._publish_transfer(
                     SftpTransferUpdate(
                         request,
-                        tr("Not queued · SSH ended or queue full"),
+                        self._file_text("Not queued · SSH ended or queue full"),
                         False,
                         result_status="error",
                     )
@@ -710,7 +743,7 @@ class SftpBrowser(QWidget):
         directory = self._directory
         if not self._directory_ready(directory):
             return
-        paths, _ = QFileDialog.getOpenFileNames(self, tr("Upload files to this SSH folder"))
+        paths, _ = QFileDialog.getOpenFileNames(self, self._file_text("Upload files to this SSH folder"))
         if paths:
             if not isValid(self) or not self._directory_ready(directory):
                 self._modal_context_changed()
@@ -746,7 +779,7 @@ class SftpBrowser(QWidget):
         message.setWindowTitle(tr("Upload dropped files?"))
         names = "\n".join(file_label(request.local_path.name)[:120] for request in requests[:8])
         message.setText(
-            tr(
+            self._file_text(
                 "SSH owner: {p0}\nFolder: {p1}\n\n{p2} files\n{p3}\n\nCopy these files? Local originals will not be moved or deleted.",
                 p0=f"{self.owner_label.text()}",
                 p1=f"{file_label(directory)}",
@@ -776,7 +809,7 @@ class SftpBrowser(QWidget):
         dialog.setWindowTitle(tr("New remote folder"))
         dialog.setInputMode(QInputDialog.InputMode.TextInput)
         # Static label: remote directory names cannot become rich-text markup.
-        dialog.setLabelText(tr("Folder name in the current SSH directory (not a path):"))
+        dialog.setLabelText(self._file_text("Folder name in the current SSH directory (not a path):"))
         dialog.setOkButtonText(tr("Create folder"))
         dialog.setCancelButtonText("Cancel")
         self._folder_dialog = dialog
@@ -790,7 +823,7 @@ class SftpBrowser(QWidget):
         if not accepted or not isValid(self):
             return
         if not self._directory_ready(directory):
-            self.status.setText(tr("The SSH folder changed or ended. Choose New folder again."))
+            self.status.setText(self._file_text("The SSH folder changed or ended. Choose New folder again."))
             return
         if not name.strip() or name in (".", "..") or "/" in name or "\0" in name:
             self.status.setText(tr("Enter one folder name, not a path."))
@@ -803,6 +836,9 @@ class SftpBrowser(QWidget):
         self._submit(request)
 
     def _download(self):
+        if self._local_directory_provider is not None:
+            self.download_to(self._local_directory_provider())
+            return
         entries = self._selected_entries()
         if entries and any(item.kind == "directory" for item in entries):
             if all(item.kind in ("file", "directory") for item in entries):
@@ -864,6 +900,45 @@ class SftpBrowser(QWidget):
             return
         self._submit_batch(requests, directory)
 
+    def upload_paths(self, paths):
+        """Use the existing reviewed copy workflow for a local file pane."""
+        self._upload_drop(paths)
+
+    def delete_selection(self):
+        entries, directory = self._selected_entries(), self._directory
+        if (len(entries) != 1 or entries[0].kind not in ("file", "directory")
+                or not self._directory_ready(directory) or "delete" not in self._capabilities):
+            return
+        entry, generation = entries[0], self._listing_generation
+        box = QMessageBox(self)
+        self._delete_dialog = box
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setWindowTitle(tr("Delete remote entry?"))
+        box.setText(tr("Delete {p0}? Folders must be empty. This action cannot be undone.", p0=file_label(entry.name)))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        try:
+            accepted = box.exec() == QMessageBox.StandardButton.Yes
+        finally:
+            self._delete_dialog = None
+            box.deleteLater()
+        if (accepted and self._directory_ready(directory) and generation == self._listing_generation
+                and self._selected_entries() == entries):
+            operation = SftpOperation.REMOVE_DIRECTORY if entry.kind == "directory" else SftpOperation.DELETE_FILE
+            self._submit(SftpRequest(operation, posixpath.join(directory, entry.name)))
+
+    def download_to(self, destination):
+        """Download the exact current selection into an explicitly displayed local pane."""
+        entries, directory = self._selected_entries(), self._directory
+        if not entries or not self._directory_ready(directory):
+            return
+        try:
+            requests = download_selection(entries, directory, Path(destination).absolute())
+        except (OSError, ValueError):
+            self.status.setText(tr("Choose supported files with distinct, safe local names."))
+            return
+        self._submit_batch(requests, directory)
+
     def cancel_transfer(self, request_id):
         transfer = self._transfers.get(request_id)
         if (
@@ -905,12 +980,14 @@ class SftpBrowser(QWidget):
             for column, value in enumerate(
                 (
                     file_label(entry.name),
-                    str(entry.size) if entry.kind == "file" and entry.size is not None else "—",
+                    file_size_text(entry.size) if entry.kind == "file" else "—",
                 )
             ):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(FILE_COLUMN_ALIGNMENTS[column])
                 self.files.setItem(row, column, item)
+            if entry.kind == "file" and entry.size is not None:
+                self.files.item(row, 1).setToolTip(exact_file_size_text(entry.size))
             item = self.files.item(row, 0)
             item.setToolTip(
                 plain_text_tooltip(
@@ -1035,6 +1112,8 @@ class SftpBrowser(QWidget):
                     SftpOperation.UPLOAD_TREE,
                     SftpOperation.EDIT_UPLOAD,
                     SftpOperation.RENAME,
+                    SftpOperation.DELETE_FILE,
+                    SftpOperation.REMOVE_DIRECTORY,
                 )
                 or (
                     request.operation is SftpOperation.MKDIR
@@ -1118,7 +1197,7 @@ class SftpBrowser(QWidget):
         message.setWindowTitle(tr("Replace existing file?"))
         message.setTextFormat(Qt.TextFormat.PlainText)
         message.setText(
-            tr(
+            self._file_text(
                 "SSH owner: {p0}\nDestination already exists:\n{p1}\n\nReplace its contents? The existing file is kept until the transfer completes.",
                 p0=f"{self.owner_label.text()}",
                 p1=f"{file_label(destination)}",
@@ -1195,6 +1274,8 @@ class SftpBrowser(QWidget):
             )
 
     def _ended(self, _code):
+        if self._delete_dialog is not None:
+            self._delete_dialog.reject()
         self.tools_dialog.reject()
         self._local_tools.close_menu()
         self._file_tools.ended()
@@ -1204,7 +1285,8 @@ class SftpBrowser(QWidget):
             self._overwrite_dialog.reject()
         if self._folder_dialog is not None:
             self._folder_dialog.reject()
-        self.status.setText(tr("SSH session ended. Reconnect and open Files again."))
+        self.status.setText(self._file_text("SSH session ended. Reconnect and open Files again.") if self._protocol_name == "SFTP"
+                            else tr("File connection ended. Connect again to open the browser."))
         self._finish_pending_transfers()
         self._update_buttons()
 
@@ -1214,7 +1296,7 @@ class SftpBrowser(QWidget):
                 self._publish_transfer(
                     replace(
                         transfer,
-                        status=tr(
+                        status=self._file_text(
                             "SSH ended; check the destination for a partial or completed transfer."
                         ),
                         pending=False,
@@ -1226,6 +1308,8 @@ class SftpBrowser(QWidget):
         if self._closed:
             return
         self._closed = True
+        if self._delete_dialog is not None and isValid(self):
+            self._delete_dialog.reject()
         self._places.dispose()
         self._file_tools.dispose()
         self._conflicts.clear()

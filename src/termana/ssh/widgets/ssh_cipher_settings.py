@@ -38,6 +38,7 @@ class SshCipherSettings(QWidget):
         self.setObjectName("sshCipherSettings")
         self._initial_cipher = validate_ssh_cipher(ssh_cipher)
         self._engine = engine
+        self._custom_discover = discover
         self._discover = discover or (
             discover_ssh_ciphers
             if engine is SshEngine.SYSTEM
@@ -120,6 +121,28 @@ class SshCipherSettings(QWidget):
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         if not self._attempted:
+            self.refresh(automatic=True)
+
+    def set_engine(self, engine: SshEngine) -> None:
+        """Keep literal selections while retiring callbacks for another engine."""
+        if engine is self._engine:
+            return
+        if type(engine) is not SshEngine:
+            raise ValueError("Unsupported SSH engine")
+        selected = self.selected_cipher
+        self._engine = engine
+        self._discover = self._custom_discover or (
+            discover_ssh_ciphers if engine is SshEngine.SYSTEM
+            else lambda: discover_engine_ciphers(engine)
+        )
+        self._operation = self._operation_id = None
+        self._available = None
+        self._attempted = self._load_failed = self._automatic_load = self._auto_retry_used = False
+        self.refresh_button.setEnabled(True)
+        self._populate_choices(selected)
+        self._update_notice()
+        self.changed.emit()
+        if self.isVisible():
             self.refresh(automatic=True)
 
     @Slot()

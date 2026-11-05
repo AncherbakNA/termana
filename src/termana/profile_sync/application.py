@@ -40,6 +40,9 @@ def _boundary(profile):
         profile.ssh_algorithms,
         profile.ssh_cipher,
         profile.rdp_options.admin_session,
+        profile.file_options.ftp_security,
+        (profile.database_options.engine, profile.database_options.database,
+         profile.database_options.tls_mode, profile.database_options.read_only),
     )
 
 
@@ -90,7 +93,7 @@ def prepare_application(
         canonical_json(
             {
                 "format": "termana-connections",
-                "version": 12,
+                "version": incoming.portable_version,
                 "items": [tree(item) for item in incoming.roots],
             }
         )
@@ -153,6 +156,10 @@ def prepare_application(
                         ssh_tunnels=old.ssh_tunnels,
                         ssh_jump=replace(profile.ssh_jump, username=old.ssh_jump.username),
                     )
+                    if profile.protocol is ConnectionProtocol.DATABASE:
+                        profile = replace(profile, database_options=replace(
+                            profile.database_options, sqlite_path=old.database_options.sqlite_path,
+                            ca_file=old.database_options.ca_file))
                     if profile.protocol is ConnectionProtocol.RDP:
                         profile = replace(
                             profile,
@@ -180,5 +187,7 @@ def prepare_application(
     candidate = ConnectionCatalog(
         root_item_ids=roots, folders=tuple(folders), profiles=tuple(profiles)
     )
-    next_ids = SyncIdentities(identities.catalog_id, tuple(bindings), incoming.tombstones)
+    # Retired IDs are a set on the wire; project_catalog returns sorted IDs.
+    # Keep the prepared local map stable even after a first-import set union.
+    next_ids = SyncIdentities(identities.catalog_id, tuple(bindings), tuple(sorted(incoming.tombstones)))
     return PreparedSyncApplication(local, identities, candidate, next_ids, tuple(detached))

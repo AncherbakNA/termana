@@ -340,7 +340,7 @@ class SshJumpSettings(QWidget):
         elif self.route_mode.currentData() == SshJumpMode.DIRECT.value:
             notice = tr("Ignores ProxyJump and ProxyCommand from SSH config for the destination.")
         else:
-            notice = tr("System uses Termana config only. Embedded needs an explicit route or a supported-config import.")
+            notice = tr("System SSH uses Termana's config. For Embedded SSH, choose Direct or Jump host, or import a supported config.")
         self.route_notice.setText(notice)
         self._sync_gateway_layout()
         self.changed.emit()

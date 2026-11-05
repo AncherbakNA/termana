@@ -57,6 +57,7 @@ class EmbeddedSshBackend(TerminalBackend):
         parent=None,
         *,
         interactive_host_trust: bool = False,
+        file_only: bool = False,
     ) -> None:
         super().__init__(parent)
         if type(plan) is not EmbeddedSshPlan or type(authentication_id) is not UUID:
@@ -65,6 +66,9 @@ class EmbeddedSshBackend(TerminalBackend):
         if type(interactive_host_trust) is not bool:
             raise TypeError("interactive host trust must be a boolean")
         self._interactive_host_trust = interactive_host_trust
+        if type(file_only) is not bool:
+            raise TypeError("file-only mode must be a boolean")
+        self._file_only = file_only
         self._trust_event = Event()
         self._trust_waiting = False
         self._trust_fingerprint = ""
@@ -186,7 +190,7 @@ class EmbeddedSshBackend(TerminalBackend):
 
     @property
     def supports_direct_input(self) -> bool:
-        return True
+        return not self._file_only
 
     def start(self) -> None:
         if self._start_attempted or self._stopping:
@@ -204,6 +208,9 @@ class EmbeddedSshBackend(TerminalBackend):
     def write(self, data: bytes) -> None:
         if type(data) is not bytes:
             raise TypeError("Embedded SSH input must be bytes")
+        if self._file_only:
+            self.warning_occurred.emit("This SFTP connection does not provide a terminal.")
+            return
         warning = None
         with self._lock:
             if self._stopping or not self._ready or self._worker_done:
@@ -228,6 +235,8 @@ class EmbeddedSshBackend(TerminalBackend):
 
     def resize(self, columns: int, rows: int) -> None:
         validate_embedded_terminal_size(columns, rows)
+        if self._file_only:
+            return
         with self._lock:
             if self._stopping or self._worker_done:
                 return
@@ -541,11 +550,15 @@ class EmbeddedSshBackend(TerminalBackend):
                 self._connected = True
                 size = self._size
                 self._resize_pending = False
-            terminal = await owned.open_terminal(*size)
+            terminal = None if self._file_only else await owned.open_terminal(*size)
             from termana.sftp.session import SftpRuntime
 
             runtime = SftpRuntime(owned, self._publish_sftp)
             proof = owned.take_proven_password()
+            if self._file_only:
+                # A file page has no password-save owner. Do not retain a
+                # terminal authentication proof or expose it to unrelated UI.
+                proof = None
             facts = owned.negotiated_facts
             with self._lock:
                 if self._stopping:
@@ -561,6 +574,18 @@ class EmbeddedSshBackend(TerminalBackend):
                 self._negotiated_facts = facts
                 self._sftp_runtime = runtime
             proof = None
+            if self._file_only:
+                children = [
+                    asyncio.create_task(runtime.run()),
+                    asyncio.create_task(owned.wait_closed()),
+                ]
+                done, _ = await asyncio.wait(children, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+                with self._lock:
+                    if not self._stopping:
+                        self._failure = EmbeddedSshFailure.CONNECTION
+                return
             children = [
                 asyncio.create_task(self._read_output(terminal)),
                 asyncio.create_task(self._write_input(terminal)),
@@ -613,6 +638,8 @@ class EmbeddedSshBackend(TerminalBackend):
 
     def _gateway_ready(self, gateway):
         proof = gateway.take_proven_password()
+        if self._file_only:
+            proof = None
         with self._lock:
             if self._stopping:
                 return

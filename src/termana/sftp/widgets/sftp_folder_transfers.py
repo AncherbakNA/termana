@@ -50,7 +50,7 @@ class SftpFolderTransfers:
         downloading = requests[0].operation in (SftpOperation.DOWNLOAD, SftpOperation.DOWNLOAD_TREE)
         destination = str(requests[0].local_path.parent) if downloading else context[0]
         message.setText(
-            tr(
+            view._file_text(
                 "SSH owner: {p0}\n{p1}:\n{p2}\n\n{p3} selected items\n{p4}\n\nInclude subfolders and empty folders. Links, junctions and special entries are excluded, never followed. Existing file conflicts require confirmation. Cancel keeps completed files; it does not roll back the folder. Originals are never moved or deleted. The queue admits at most {p5} jobs; any unqueued items are shown and are not sent.",
                 p0=f"{view.owner_label.text()}",
                 p1=f"{('Download to local folder' if downloading else 'Upload to remote folder')}",
@@ -130,7 +130,7 @@ class SftpFolderTransfers:
         message.setWindowTitle(tr("Files already exist in this folder"))
         message.setTextFormat(Qt.TextFormat.PlainText)
         message.setText(
-            tr(
+            view._file_text(
                 "SSH owner: {p0}\nFolder: {p1}\n\nThe scan found existing regular files. Merge subfolders and keep or replace those files? Unrelated destination entries are never deleted. Nothing has been copied by this folder job yet.",
                 p0=f"{view.owner_label.text()}",
                 p1=f"{file_label(request.remote_path)}",

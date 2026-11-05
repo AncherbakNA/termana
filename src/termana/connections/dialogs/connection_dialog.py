@@ -29,6 +29,8 @@ from termana.connections.widgets.connection_sections import (
     ConnectionSections,
     ConnectionSettingsScrollArea,
 )
+from termana.connections.widgets.database_profile_fields import DatabaseProfileFields
+from termana.connections.widgets.file_profile_fields import FileProfileFields
 from termana.models.connection import (
     DEFAULT_SSH_PORT,
     MAX_CONNECTION_HOST_CHARACTERS,
@@ -41,6 +43,8 @@ from termana.models.connection import (
     WordDeleteMode,
     default_port_for_protocol,
 )
+from termana.models.database_options import DatabaseOptions
+from termana.models.file_options import FileOptions
 from termana.models.rdp_options import RDP_ZOOMS, RdpOptions
 from termana.models.settings import SshEngine
 from termana.models.ssh_algorithms import SshAlgorithms
@@ -103,14 +107,16 @@ class ConnectionDialog(QDialog):
             raise ValueError("A new connection route must be config or direct")
         include_rdp = True
         if initial_protocol is not None and (
-            initial_protocol not in ("ssh", "telnet", "rdp")
+            initial_protocol not in tuple(p.value for p in ConnectionProtocol)
             or profile is not None
             or initial_profile is not None
         ):
             raise ValueError("Initial protocol is supported only for a blank new connection")
         super().__init__(parent)
         seed_profile = profile if profile is not None else initial_profile
+        self._seed_profile = seed_profile
         self._save_handler = save_handler
+        self._configured_ssh_engine = ssh_engine
         self._rdp_endpoint: RdpEndpoint | None = None
 
         self.setObjectName("connectionDialog")
@@ -139,6 +145,11 @@ class ConnectionDialog(QDialog):
             account_choices, manage_accounts, profile, seed_profile
         )
 
+        self.file_settings = FileProfileFields(options=seed_profile.file_options if seed_profile else FileOptions())
+        form.addRow(self.file_settings)
+        self.database_settings = DatabaseProfileFields(options=seed_profile.database_options if seed_profile else DatabaseOptions())
+        self._database_engine = self.database_settings.engine.currentData()
+        form.addRow(self.database_settings)
         self._build_endpoint_header(form, seed_profile, ssh_engine)
         self._build_ssh_sections(account_row, new_ssh_route, seed_profile, ssh_engine)
 
@@ -190,9 +201,9 @@ class ConnectionDialog(QDialog):
         body_layout.setSpacing(14)
 
         description_text = (
-            tr("Update this connection profile. Authentication happens when the session opens.")
+            tr("Changes apply to new sessions. Sign in when you connect.")
             if profile
-            else tr("Create a connection profile. Authentication happens when the session opens.")
+            else tr("Sign in when you open the session.")
         )
         description = QLabel(description_text)
         if initial_profile is not None:
@@ -347,7 +358,16 @@ class ConnectionDialog(QDialog):
         endpoint_layout.setContentsMargins(24, 14, 24, 12)
         endpoint_layout.setSpacing(10)
         endpoint_layout.addWidget(self.protocol_label)
-        endpoint_layout.addWidget(self.protocol_input, 0, Qt.AlignmentFlag.AlignLeft)
+        self.protocol_scroll = ConnectionSettingsScrollArea(self.endpoint_widget)
+        self.protocol_scroll.setObjectName("connectionProtocolScroll")
+        self.protocol_scroll.setAccessibleName(tr("Connection protocols"))
+        self.protocol_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.protocol_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.protocol_scroll.setWidgetResizable(True)
+        self.protocol_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.protocol_scroll.setWidget(self.protocol_input)
+        self.protocol_scroll.setFixedHeight(self.protocol_input.sizeHint().height())
+        endpoint_layout.addWidget(self.protocol_scroll)
         endpoint_form = QGridLayout()
         endpoint_form.setContentsMargins(0, 0, 0, 0)
         endpoint_form.setHorizontalSpacing(14)
@@ -506,6 +526,7 @@ class ConnectionDialog(QDialog):
 
         self.save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
         self.save_button.setObjectName("saveConnectionButton")
+        self.save_button.setProperty("actionRole", "primary")
         self.save_button.setAccessibleName(tr("Save connection"))
         self.save_button.setEnabled(False)
 
@@ -529,6 +550,7 @@ class ConnectionDialog(QDialog):
         self.port_input.valueChanged.connect(self._mark_port_as_custom)
         self.folder_input.currentIndexChanged.connect(self._clear_validation_error)
         self.protocol_input.currentIndexChanged.connect(self._handle_protocol_changed)
+        self.database_settings.changed.connect(self._database_settings_changed)
         self.telnet_encoding_input.currentIndexChanged.connect(self._clear_validation_error)
         self.ssh_cipher_settings.changed.connect(self._handle_cipher_changed)
         self.ssh_cipher_settings.edited.connect(self._clear_validation_error)
@@ -777,6 +799,27 @@ class ConnectionDialog(QDialog):
         # frame extents. Do not poll or keep refitting after user interaction.
         self._initial_geometry_applied = True
         handle.removeEventFilter(self)
+        # Keep the endpoint/footer pinned even when large fonts make the
+        # protocol grid taller than a short screen. Do not shrink its captions.
+        screen = self.screen()
+        if screen is not None:
+            natural = self.protocol_input.sizeHint().height()
+            other = self.minimumSizeHint().height() - self.protocol_scroll.minimumHeight()
+            frame = max(0, self.frameGeometry().height() - self.height())
+            if natural + other + frame > screen.availableGeometry().height():
+                # The selector already has an accessible name and visible type
+                # captions. Its redundant heading must not push Save offscreen.
+                self.protocol_label.hide()
+                endpoint_layout = self.endpoint_widget.layout()
+                margins = endpoint_layout.contentsMargins()
+                endpoint_layout.setContentsMargins(margins.left(), 8, margins.right(), 8)
+                endpoint_layout.activate()
+                self.layout().activate()
+                other = self.minimumSizeHint().height() - self.protocol_scroll.minimumHeight()
+            available = screen.availableGeometry().height() - other - frame
+            minimum = max(button.sizeHint().height() for button in self.protocol_input.buttons)
+            self.protocol_scroll.setFixedHeight(min(natural, max(minimum, available)))
+            self.layout().activate()
         fit_dialog_to_screen(self)
 
     def _update_save_button(self) -> None:
@@ -787,7 +830,8 @@ class ConnectionDialog(QDialog):
     def _sync_save_button(self) -> None:
         """Background capability results must not erase a host/name validation error."""
         has_name = bool(self.name_input.text().strip())
-        has_host = bool(self.host_input.text().strip())
+        is_database = self._current_protocol is ConnectionProtocol.DATABASE
+        has_host = bool(self.host_input.text().strip()) or (is_database and self.database_settings.engine.currentData() == "sqlite")
         route_host_error = self._target_route_host_error()
         self.route_host_error.setText(route_host_error or "")
         self.route_host_error.setVisible(route_host_error is not None)
@@ -796,6 +840,7 @@ class ConnectionDialog(QDialog):
             and has_host
             and self._ssh_settings_error() is None
             and self._rdp_settings_error() is None
+            and (not is_database or self.database_settings.selection_error is None)
         )
         self._refresh_section_summaries()
 
@@ -856,8 +901,13 @@ class ConnectionDialog(QDialog):
             self.body_scroll.ensureWidgetVisible(target, 0, 12)
 
     def _ssh_settings_error(self) -> str | None:
-        if self._current_protocol is not ConnectionProtocol.SSH:
+        if self._current_protocol not in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP):
             return None
+        if self._current_protocol is ConnectionProtocol.SFTP:
+            if self.ssh_algorithm_settings.protocol.currentData() == "1":
+                return tr("SFTP requires SSH2. Choose Automatic or SSH2 only.")
+            if self.ssh_jump_settings.route_mode.currentData() == SshJumpMode.CONFIG.value:
+                return tr("Standalone SFTP uses Embedded SSH. Choose Direct or a jump host.")
         return (
             self.ssh_cipher_settings.selection_error
             or self.ssh_algorithm_settings.selection_error
@@ -870,7 +920,7 @@ class ConnectionDialog(QDialog):
 
     def _target_route_host_error(self) -> str | None:
         if (
-            self._current_protocol is not ConnectionProtocol.SSH
+            self._current_protocol not in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
             or self.ssh_jump_settings.route_mode.currentData() != SshJumpMode.JUMP.value
             or not self.host_input.text().strip()
         ):
@@ -883,7 +933,7 @@ class ConnectionDialog(QDialog):
 
     def _ssh_error_control(self) -> QWidget | None:
         """Locate an inline route/key error without overriding earlier cipher errors."""
-        if self._current_protocol is not ConnectionProtocol.SSH:
+        if self._current_protocol not in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP):
             return None
         if self.ssh_algorithm_settings.selection_error:
             return self.ssh_algorithm_settings
@@ -923,9 +973,7 @@ class ConnectionDialog(QDialog):
             self.port_input.setValue(profile.port)
         finally:
             self._updating_protocol_default = False
-        self._port_uses_protocol_default = profile.port == default_port_for_protocol(
-            profile.protocol
-        )
+        self._port_uses_protocol_default = profile.port == self._protocol_default_port(profile.protocol)
         encoding_index = self.telnet_encoding_input.findData(profile.telnet_encoding.value)
         if encoding_index >= 0:
             self.telnet_encoding_input.setCurrentIndex(encoding_index)
@@ -948,11 +996,37 @@ class ConnectionDialog(QDialog):
         if self._port_uses_protocol_default:
             self._updating_protocol_default = True
             try:
-                self.port_input.setValue(default_port_for_protocol(selected_protocol))
+                self.port_input.setValue(self._protocol_default_port(selected_protocol))
             finally:
                 self._updating_protocol_default = False
+        if (selected_protocol is ConnectionProtocol.SFTP and self._seed_profile is None
+                and not self.host_input.text().strip()
+                and self.ssh_jump_settings.route_mode.currentData() == SshJumpMode.CONFIG.value):
+            self.ssh_jump_settings.route_mode.setCurrentIndex(
+                self.ssh_jump_settings.route_mode.findData(SshJumpMode.DIRECT.value))
         self._current_protocol = selected_protocol
         self._update_protocol_notice()
+        self._update_save_button()
+
+    def _protocol_default_port(self, protocol):
+        if protocol is ConnectionProtocol.DATABASE and self.database_settings.engine.currentData() == "mysql":
+            return 3306
+        return default_port_for_protocol(protocol)
+
+    def _database_settings_changed(self):
+        engine = self.database_settings.engine.currentData()
+        previous = 3306 if self._database_engine == "mysql" else 5432
+        if (self._current_protocol is ConnectionProtocol.DATABASE and self._port_uses_protocol_default
+                and self.port_input.value() == previous):
+            self._updating_protocol_default = True
+            try:
+                self.port_input.setValue(3306 if engine == "mysql" else 5432)
+            finally:
+                self._updating_protocol_default = False
+        self._database_engine = engine
+        local = self._current_protocol is ConnectionProtocol.DATABASE and engine == "sqlite"
+        for widget in (self.host_input, self.port_input):
+            widget.setEnabled(not local)
         self._update_save_button()
 
     def _mark_port_as_custom(self, _value: int) -> None:
@@ -963,10 +1037,22 @@ class ConnectionDialog(QDialog):
     def _update_protocol_notice(self) -> None:
         """Show only the selected protocol's controls without losing other drafts."""
         is_telnet = self._current_protocol is ConnectionProtocol.TELNET
-        is_ssh = self._current_protocol is ConnectionProtocol.SSH
+        is_ssh = self._current_protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
+        engine = SshEngine.EMBEDDED if self._current_protocol is ConnectionProtocol.SFTP else self._configured_ssh_engine
+        self.ssh_cipher_settings.set_engine(engine)
+        self.ssh_algorithm_settings.set_engine(engine)
+        legacy = self.ssh_algorithm_settings.protocol.model().item(
+            self.ssh_algorithm_settings.protocol.findData("1"))
+        legacy.setEnabled(self._current_protocol is not ConnectionProtocol.SFTP)
         is_rdp = self.protocol_input.currentData() == "rdp"
-        self.word_delete_label.setVisible(not is_rdp)
-        self.word_delete_row.setVisible(not is_rdp)
+        is_terminal = self._current_protocol in (ConnectionProtocol.SSH, ConnectionProtocol.TELNET)
+        self.word_delete_label.setVisible(is_terminal)
+        self.word_delete_row.setVisible(is_terminal)
+        self.file_settings.set_protocol(self._current_protocol)
+        self.database_settings.setVisible(self._current_protocol is ConnectionProtocol.DATABASE)
+        local_database = self._current_protocol is ConnectionProtocol.DATABASE and self.database_settings.engine.currentData() == "sqlite"
+        self.host_input.setEnabled(not local_database)
+        self.port_input.setEnabled(not local_database)
         self.profile_widget.setVisible(True)
         self.rdp_notice.setVisible(is_rdp)
         self.rdp_display_row.setVisible(is_rdp)
@@ -982,8 +1068,8 @@ class ConnectionDialog(QDialog):
         self.telnet_security_notice.setVisible(is_telnet)
         self.ssh_cipher_label.setVisible(is_ssh)
         self.ssh_algorithm_settings.setVisible(is_ssh)
-        self.ssh_account_row.setVisible(is_ssh)
-        self.ssh_account_label.setVisible(is_ssh)
+        self.ssh_account_row.setVisible(self._current_protocol is ConnectionProtocol.SSH)
+        self.ssh_account_label.setVisible(self._current_protocol is ConnectionProtocol.SSH)
         self.ssh_cipher_settings.setVisible(is_ssh)
         self.ssh_cipher_settings.setEnabled(is_ssh)
         self.ssh_connection_settings.setVisible(is_ssh)
@@ -992,9 +1078,13 @@ class ConnectionDialog(QDialog):
         self.ssh_identity_settings.setEnabled(is_ssh)
         self.ssh_jump_settings.setVisible(is_ssh)
         self.ssh_jump_settings.setEnabled(is_ssh)
-        self.ssh_tunnel_settings.setVisible(is_ssh)
-        self.ssh_tunnel_settings.setEnabled(is_ssh)
+        self.ssh_tunnel_settings.setVisible(self._current_protocol is ConnectionProtocol.SSH)
+        self.ssh_tunnel_settings.setEnabled(self._current_protocol is ConnectionProtocol.SSH)
         self.sections.set_ssh_available(is_ssh)
+        if self._current_protocol is ConnectionProtocol.SFTP:
+            self.sections.tabs.setTabVisible(3, False)
+            if self.sections.current_section == "tunnels":
+                self.sections.show_overview()
         if is_telnet and self.isVisible():
             self._telnet_reveal_timer.start(0)
 
@@ -1013,7 +1103,7 @@ class ConnectionDialog(QDialog):
             return
         if not self._cipher_has_focus():
             return
-        if self._current_protocol is ConnectionProtocol.SSH and self.isVisible():
+        if self._current_protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP) and self.isVisible():
             QTimer.singleShot(0, self, self._reveal_cipher_selection)
 
     def _handle_tunnel_focus_requested(self, control: object) -> None:
@@ -1063,6 +1153,9 @@ class ConnectionDialog(QDialog):
             return  # Queued clicks/Enter must not persist the same draft twice.
         self._update_save_button()
         if not self.save_button.isEnabled():
+            if self._current_protocol is ConnectionProtocol.DATABASE and self.database_settings.selection_error:
+                self._show_validation_error(self.database_settings.selection_error, self.database_settings.database)
+                return
             if self._rdp_settings_error() is not None:
                 self._show_validation_error(self._rdp_settings_error(), self.rdp_username_input)
                 return
@@ -1085,7 +1178,7 @@ class ConnectionDialog(QDialog):
             )
             values = {
                 "name": self.name_input.text().strip(),
-                "host": self.host_input.text().strip(),
+                "host": ((self.host_input.text().strip() or "localhost") if protocol is ConnectionProtocol.DATABASE and self.database_settings.engine.currentData() == "sqlite" else self.host_input.text().strip()),
                 "protocol": protocol,
                 "rdp_options": (
                     self._selected_rdp_options()
@@ -1093,6 +1186,8 @@ class ConnectionDialog(QDialog):
                     else RdpOptions()
                 ),
                 "port": self.port_input.value(),
+                "file_options": self.file_settings.selected,
+                "database_options": (self.database_settings.selected if protocol is ConnectionProtocol.DATABASE else DatabaseOptions()),
                 "username": None,
                 "ssh_account_id": (
                     UUID(self.ssh_account_input.currentData())
@@ -1101,34 +1196,34 @@ class ConnectionDialog(QDialog):
                 ),
                 "ssh_algorithms": (
                     self.ssh_algorithm_settings.selected
-                    if protocol is ConnectionProtocol.SSH
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
                     else SshAlgorithms()
                 ),
                 "telnet_encoding": telnet_encoding,
                 "accent_color": self.color_picker.selected_color,
                 "word_delete_mode": (
                     WordDeleteMode(str(self.word_delete_input.currentData()))
-                    if protocol is not ConnectionProtocol.RDP
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.TELNET)
                     else WordDeleteMode.ESCAPE_DEL
                 ),
                 "ssh_cipher": (
                     self.ssh_cipher_settings.selected_cipher
-                    if protocol is ConnectionProtocol.SSH
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
                     else None
                 ),
                 "ssh_options": (
                     self.ssh_connection_settings.selected_options
-                    if protocol is ConnectionProtocol.SSH
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
                     else SshConnectionOptions()
                 ),
                 "ssh_identity": (
                     self.ssh_identity_settings.selected_options
-                    if protocol is ConnectionProtocol.SSH
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
                     else SshIdentityOptions()
                 ),
                 "ssh_jump": (
                     self.ssh_jump_settings.selected_options
-                    if protocol is ConnectionProtocol.SSH
+                    if protocol in (ConnectionProtocol.SSH, ConnectionProtocol.SFTP)
                     else SshJumpOptions()
                 ),
                 "ssh_tunnels": (
@@ -1153,7 +1248,7 @@ class ConnectionDialog(QDialog):
                 else self.host_input
                 if message.startswith("Connection host")
                 else self.protocol_input
-                if self.protocol_input.currentData() not in ("ssh", "telnet", "rdp")
+                if self.protocol_input.currentData() not in tuple(p.value for p in ConnectionProtocol)
                 else None
             )
             self._show_validation_error(validation_text(message), control)

@@ -24,6 +24,7 @@ InterfaceIconName = Literal[
     "refresh",
     "copy",
     "server",
+    "database",
     "split",
     "split_rows",
     "pane_grid",
@@ -199,6 +200,12 @@ def _interface_pixmap(name: InterfaceIconName, color: str, *, size: int) -> QPix
         elif name == "copy":
             painter.drawRoundedRect(QRectF(2, 2, 10, 11), 1, 1)
             painter.drawRoundedRect(QRectF(6, 6, 10, 10), 1, 1)
+        elif name == "database":
+            painter.drawEllipse(QRectF(2.5, 2, 13, 4))
+            painter.drawLine(QPointF(2.5, 4), QPointF(2.5, 14))
+            painter.drawLine(QPointF(15.5, 4), QPointF(15.5, 14))
+            painter.drawArc(QRectF(2.5, 7, 13, 4), 180 * 16, 180 * 16)
+            painter.drawArc(QRectF(2.5, 12, 13, 4), 180 * 16, 180 * 16)
         elif name == "server":
             for top in (2.5, 10):
                 painter.drawRoundedRect(QRectF(2, top, 14, 5.5), 1.3, 1.3)

@@ -81,6 +81,7 @@ def run(app):
         legacy_connections.pop("sync_state")
         for profile in legacy_connections["connections"]:
             del profile["accent_color"]
+            del profile["file_options"]  # File-client preferences first appeared in schema 18.
         connection_raw = json.dumps(legacy_connections).encode()
         connection_path.write_bytes(connection_raw)
         assert connections.load() == catalog and connection_path.read_bytes() == connection_raw

@@ -26,6 +26,8 @@ from shiboken6 import isValid
 
 from termana.app.qt_lifecycle import schedule_delete_later
 from termana.connections.connection_colors import connection_icon_color
+from termana.database.page import DatabasePage
+from termana.file_transfer.page import FilePage
 from termana.models.connection import ConnectionProfile, ConnectionProtocol, WordDeleteMode
 from termana.models.open_terminal import OpenTerminalSession, OpenTerminalState
 from termana.models.settings import (
@@ -238,7 +240,7 @@ class TerminalWorkspace(QFrame):
         self._local_terminal_settings = LocalTerminalSettings()
         self._backspace_sends_ctrl_h = False
         self._published_terminal_count = 0
-        self._closing_pages: set[TerminalPage | RdpPage] = set()
+        self._closing_pages: set[TerminalPage | RdpPage | FilePage | DatabasePage] = set()
         self._command_contexts: dict[TerminalPage, object] = {}
         self._local_reconnect_pages: set[TerminalPage] = set()
         self._connection_reconnect_profiles: dict[TerminalPage, ConnectionProfile] = {}
@@ -421,16 +423,18 @@ class TerminalWorkspace(QFrame):
         for pane_number, tabs in enumerate(self.panes.tab_groups, 1):
             for index in range(tabs.count()):
                 page = tabs.widget(index)
-                if not isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage)):
+                if not isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage)):
                     continue
                 if page in self._closing_pages:
                     continue
                 if isinstance(page, InlineTerminalPromptPage):
                     title = page.terminal_name
                     state = OpenTerminalState.LOGIN
-                elif isinstance(page, RdpPage):
+                elif isinstance(page, (RdpPage, FilePage, DatabasePage)):
                     title = page.display_title
-                    state = OpenTerminalState.ENDED if page.session_ended else OpenTerminalState.OPEN
+                    state = (OpenTerminalState.ENDED if page.session_ended else
+                             OpenTerminalState.LOGIN if isinstance(page, (FilePage, DatabasePage)) and page.awaiting_login
+                             else OpenTerminalState.OPEN)
                 else:
                     title = page.display_title
                     state = _terminal_page_state(page)
@@ -442,7 +446,8 @@ class TerminalWorkspace(QFrame):
                         pane_number=pane_number,
                         state=state,
                         active=tabs is self.tabs and tabs.currentWidget() is page,
-                        attention=page in self._attention_pages,
+                        attention=(page in self._attention_pages or
+                                   (isinstance(page, (FilePage, DatabasePage)) and page.needs_attention)),
                     )
                 )
         return tuple(sessions)
@@ -541,7 +546,7 @@ class TerminalWorkspace(QFrame):
     @property
     def active_pane_terminal_count(self) -> int:
         return sum(
-            isinstance(self.tabs.widget(index), (TerminalPage, InlineTerminalPromptPage, RdpPage))
+            isinstance(self.tabs.widget(index), (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage))
             for index in range(self.tabs.count())
         )
 
@@ -574,10 +579,12 @@ class TerminalWorkspace(QFrame):
     def _set_session_icon(self, tabs, index, protocol):
         page = tabs.widget(index)
         page.setProperty("sessionProtocol", protocol)
-        glyph = {"ssh": "server", "telnet": "terminal", "rdp": "desktop"}.get(protocol, "terminal")
+        glyph = {"ssh": "server", "telnet": "terminal", "rdp": "desktop",
+                 "sftp": "folder", "ftp": "folder", "tftp": "file", "database": "database"}.get(protocol, "terminal")
         attention = isinstance(page, TerminalPage) and (
             page in self._attention_pages or page.ssh_secret_tab_label is not None
         )
+        attention = attention or (isinstance(page, (FilePage, DatabasePage)) and page.needs_attention)
         color = self._interface_colors.accent if attention else self._interface_colors.text
         if not attention and page.property("connectionAccent"):
             color = connection_icon_color(page.property("connectionAccent"), self._interface_colors.surface,
@@ -675,7 +682,7 @@ class TerminalWorkspace(QFrame):
     def move_current_to_next_pane(self, _checked: bool = False) -> bool:
         groups = self.panes.tab_groups
         page = self.tabs.currentWidget()
-        if len(groups) < 2 or not isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage)):
+        if len(groups) < 2 or not isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage)):
             return False
         target = groups[(groups.index(self.tabs) + 1) % len(groups)]
         moved = self.panes.move_page(page, target)
@@ -799,7 +806,7 @@ class TerminalWorkspace(QFrame):
     def terminal_count(self) -> int:
         """Return the number of open terminal tabs."""
         return sum(
-            isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage))
+            isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage))
             for page in self._all_pages()
         )
 
@@ -814,7 +821,7 @@ class TerminalWorkspace(QFrame):
         return sum(
             1
             for page in self._all_pages()
-            if isinstance(page, (TerminalPage, RdpPage)) and page.requires_close_confirmation
+            if isinstance(page, (TerminalPage, RdpPage, FilePage, DatabasePage)) and page.requires_close_confirmation
         )
 
     @property
@@ -850,6 +857,8 @@ class TerminalWorkspace(QFrame):
         for page in self._all_pages():
             tabs = self.panes.owner_of(page)
             protocol = page.property("sessionProtocol")
+            if isinstance(page, (FilePage, DatabasePage)):
+                page.set_interface_colors(colors)
             if tabs is not None and protocol:
                 self._set_session_icon(tabs, tabs.indexOf(page), protocol)
 
@@ -956,6 +965,42 @@ class TerminalWorkspace(QFrame):
         tabs.setCurrentWidget(page)
         self._shortcut_event_filter.watch(page.surface)
         page.state_changed.connect(self._publish_open_sessions_changed)
+        self._sync_tab_bar_visibility()
+        self._publish_terminal_count()
+        page.start()
+        return page
+
+    def open_file_session(self, profile, *, known_hosts, local_directory=None, backend_factory=None):
+        """One independent file page; no terminal backend or hidden shell is opened."""
+        if not self.accepts_new_terminals:
+            return None
+        page = FilePage(profile, known_hosts=known_hosts, local_directory=local_directory,
+                        backend_factory=backend_factory)
+        return self._open_auxiliary_session(page, profile)
+
+    def open_database_session(self, profile, *, backend_factory=None):
+        if not self.accepts_new_terminals:
+            return None
+        page = DatabasePage(profile, **({"backend_factory": backend_factory} if backend_factory is not None else {}))
+        return self._open_auxiliary_session(page, profile)
+
+    def _open_auxiliary_session(self, page, profile):
+        self._bind_connection_color(page, profile)
+        page.set_focus_guard(lambda: self._page_may_take_focus(page))
+        page.set_interface_colors(self._interface_colors)
+        tabs = self.tabs
+        self._hide_start_page()
+        index = tabs.addTab(page, _qt_tab_label(page.display_title))
+        self._set_session_icon(tabs, index, profile.protocol.value)
+        tabs.setTabToolTip(index, plain_text_tooltip(page.display_title))
+        tabs.setTabsClosable(True)
+        tabs.setCurrentWidget(page)
+        def changed():
+            owner = self.panes.owner_of(page)
+            if owner is not None:
+                self._set_session_icon(owner, owner.indexOf(page), profile.protocol.value)
+            self._publish_open_sessions_changed()
+        page.state_changed.connect(changed)
         self._sync_tab_bar_visibility()
         self._publish_terminal_count()
         page.start()
@@ -1474,7 +1519,7 @@ class TerminalWorkspace(QFrame):
             if not self.accepts_new_terminals:
                 break
             page = self._page_for_session(session_id)
-            if isinstance(page, RdpPage):
+            if isinstance(page, (RdpPage, FilePage, DatabasePage)):
                 if page not in self._closing_pages and page.session_ended:
                     self._close_page(page)
                     closed.append(session_id)
@@ -1529,6 +1574,9 @@ class TerminalWorkspace(QFrame):
     def _focus_terminal_input(page: QWidget | None) -> None:
         """Restore the input surface owned by a tab selected from a shortcut."""
         reason = Qt.FocusReason.ShortcutFocusReason
+        if isinstance(page, (FilePage, DatabasePage)):
+            page.focus_input()
+            return
         if isinstance(page, RdpPage):
             if page.stack.currentWidget() is page.desktop_view:
                 page.surface.setFocus(reason)
@@ -1670,7 +1718,7 @@ class TerminalWorkspace(QFrame):
         self._publish_terminal_count()
         self.terminal_closed.emit(terminal_name)
 
-        if isinstance(page, (TerminalPage, RdpPage)):
+        if isinstance(page, (TerminalPage, RdpPage, FilePage, DatabasePage)):
             self._begin_page_shutdown(page)
         elif isinstance(page, InlineTerminalPromptPage):
             self._dispose_ssh_login_prompt(page)
@@ -1688,7 +1736,7 @@ class TerminalWorkspace(QFrame):
 
         if (
             self._confirm_session_close
-            and isinstance(page, (TerminalPage, RdpPage))
+            and isinstance(page, (TerminalPage, RdpPage, FilePage, DatabasePage))
             and page.requires_close_confirmation
         ):
             if not self._confirm_terminal_close(page):
@@ -1703,23 +1751,28 @@ class TerminalWorkspace(QFrame):
             raise TypeError("confirm_session_close must be a boolean")
         self._confirm_session_close = enabled
 
-    def _confirm_terminal_close(self, page: TerminalPage | RdpPage) -> bool:
+    def _confirm_terminal_close(self, page: TerminalPage | RdpPage | FilePage | DatabasePage) -> bool:
         """Confirm the explicitly requested terminal close; Enter accepts, Escape cancels."""
         message_box = QMessageBox(self)
         message_box.setOption(QMessageBox.Option.DontUseNativeDialog, True)
         message_box.setObjectName("closeActiveTerminalDialog")
-        message_box.setWindowTitle(tr("Disconnect remote desktop?") if isinstance(page, RdpPage)
+        message_box.setWindowTitle(tr("Disconnect database?") if isinstance(page, DatabasePage) else tr("Disconnect file session?") if isinstance(page, FilePage)
+                                   else tr("Disconnect remote desktop?") if isinstance(page, RdpPage)
                                    else tr("Close terminal?"))
         message_box.setIcon(QMessageBox.Icon.Warning)
         message_box.setTextFormat(Qt.TextFormat.PlainText)
         message_box.setText(tr('Close "{p0}"?', p0=f"{page.terminal_name}"))
         message_box.setInformativeText(
+            tr("Close this database tab? SQL drafts and results in this tab will be discarded. Uncommitted transactions are rolled back where supported. Check server state after interruption.")
+            if isinstance(page, DatabasePage) else
+            tr("Closing this file session stops its jobs. Check any partial destination before retrying.")
+            if isinstance(page, FilePage) else
             tr("Disconnect this remote desktop? Windows will not be signed out.")
             if isinstance(page, RdpPage) else
             tr("This terminal is still active. Closing it will stop the running session.")
         )
 
-        close_button = QPushButton(tr("Disconnect") if isinstance(page, RdpPage)
+        close_button = QPushButton(tr("Disconnect") if isinstance(page, (RdpPage, FilePage, DatabasePage))
                                    else tr("Close terminal"), message_box)
         close_button.setObjectName("confirmCloseTerminalButton")
         message_box.addButton(close_button, QMessageBox.ButtonRole.DestructiveRole)
@@ -1743,14 +1796,14 @@ class TerminalWorkspace(QFrame):
         pages = [
             page
             for page in self._all_pages()
-            if isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage))
+            if isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage))
         ]
 
         for page in pages:
             tabs = self.panes.owner_of(page)
             if tabs is not None:
                 tabs.removeTab(tabs.indexOf(page))
-            if isinstance(page, (TerminalPage, RdpPage)):
+            if isinstance(page, (TerminalPage, RdpPage, FilePage, DatabasePage)):
                 self._begin_page_shutdown(page)
             elif isinstance(page, InlineTerminalPromptPage):
                 self._dispose_ssh_login_prompt(page)
@@ -1877,7 +1930,7 @@ class TerminalWorkspace(QFrame):
                 self.panes.move_page(current_page, self._tabs_for_pane(pane_id))
                 self._focus_active_pane()
 
-    def _begin_page_shutdown(self, page: TerminalPage | RdpPage) -> None:
+    def _begin_page_shutdown(self, page: TerminalPage | RdpPage | FilePage | DatabasePage) -> None:
         """Keep a hidden page alive until its backend reports completion."""
         self._attention_pages.discard(page)
         if page in self._closing_pages:
@@ -1906,7 +1959,7 @@ class TerminalWorkspace(QFrame):
     def _finish_page_shutdown(self) -> None:
         """Delete a stopped page and finish an application-wide shutdown."""
         page = self.sender()
-        if not isinstance(page, (TerminalPage, RdpPage)):
+        if not isinstance(page, (TerminalPage, RdpPage, FilePage, DatabasePage)):
             return
 
         self._closing_pages.discard(page)
@@ -2291,7 +2344,7 @@ class TerminalWorkspace(QFrame):
         """Resolve stable session identity across every pane, never a local index."""
         for page in self._all_pages():
             if (
-                isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage))
+                isinstance(page, (TerminalPage, InlineTerminalPromptPage, RdpPage, FilePage, DatabasePage))
                 and page.session_id == session_id
             ):
                 return page

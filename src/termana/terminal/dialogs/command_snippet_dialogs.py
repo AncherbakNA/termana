@@ -810,12 +810,12 @@ class SavedCommandsDialog(_LibraryDialog):
         self.state_label.setVisible(not visible_count)
         self.count_label.setText(
             tr(
-                "{p0} shown · {p1} of {p2} saved commands",
+                "{p0} shown · {p1} saved",
                 p0=f"{visible_count}",
                 p1=f"{len(self._snippets)}",
-                p2=f"{MAX_COMMAND_SNIPPETS}",
             )
         )
+        self.count_label.setToolTip(tr("Up to {p0} saved commands.", p0=MAX_COMMAND_SNIPPETS))
         self._update_actions()
 
     def _selected_snippet(self) -> CommandSnippet | None:

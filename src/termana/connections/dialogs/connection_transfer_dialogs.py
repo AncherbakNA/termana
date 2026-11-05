@@ -284,6 +284,11 @@ class ConnectionTransferConfirmationDialog(QDialog):
             body_parts.append(tr(ENTIRE_FOLDER_EXPORT_NOTICE))
         if stats is not None and stats.rdp_connections:
             body_parts.append(tr("RDP connections: {p0}", p0=stats.rdp_connections))
+        if stats is not None:
+            for label, count in (("SFTP", stats.sftp_connections), ("FTP", stats.ftp_connections),
+                                 ("TFTP", stats.tftp_connections), ("Database", stats.database_connections)):
+                if count:
+                    body_parts.append(tr("{p0} connections: {p1}", p0=label, p1=count))
         body_parts.append(tr(EXPORT_CONNECTIONS_NOTICE))
         dialog = cls(
             object_name="exportConnectionsConfirmationDialog",
@@ -362,6 +367,10 @@ class ConnectionTransferConfirmationDialog(QDialog):
         )
         if stats.rdp_connections:
             body = tr("RDP connections: {p0}", p0=stats.rdp_connections) + "\n" + body
+        for label, count in (("SFTP", stats.sftp_connections), ("FTP", stats.ftp_connections),
+                             ("TFTP", stats.tftp_connections), ("Database", stats.database_connections)):
+            if count:
+                body = tr("{p0} connections: {p1}", p0=label, p1=count) + "\n" + body
         return cls(
             object_name="importConnectionsConfirmationDialog",
             window_title=tr("Import connections?"),

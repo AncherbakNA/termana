@@ -22,6 +22,8 @@ class SftpOperation(StrEnum):
     EDIT_DOWNLOAD = "edit-download"
     EDIT_UPLOAD = "edit-upload"
     RENAME = "rename"
+    DELETE_FILE = "delete-file"
+    REMOVE_DIRECTORY = "remove-directory"
     DOWNLOAD_TREE = "download-tree"
     UPLOAD_TREE = "upload-tree"
 
@@ -43,6 +45,8 @@ _OPERATION_LABELS = MappingProxyType(
         SftpOperation.EDIT_DOWNLOAD: "Open text for editing",
         SftpOperation.EDIT_UPLOAD: "Save edited text",
         SftpOperation.RENAME: "Rename/move file",
+        SftpOperation.DELETE_FILE: "Delete file",
+        SftpOperation.REMOVE_DIRECTORY: "Remove empty folder",
         SftpOperation.DOWNLOAD_TREE: "Download folder",
         SftpOperation.UPLOAD_TREE: "Upload folder",
     }
@@ -141,10 +145,11 @@ class SftpRequest:
                 raise ValueError("Edited save requires its original version and explicit overwrite")
         elif self.version is not None:
             raise ValueError("Only edited save accepts a remote version")
-        if self.operation in (SftpOperation.LIST, SftpOperation.MKDIR):
+        if self.operation in (SftpOperation.LIST, SftpOperation.MKDIR,
+                              SftpOperation.DELETE_FILE, SftpOperation.REMOVE_DIRECTORY):
             if self.local_path is not None or self.overwrite:
                 raise ValueError("Directory requests cannot transfer or overwrite files")
-            if self.operation is SftpOperation.MKDIR and (
+            if self.operation is not SftpOperation.LIST and (
                 not self.remote_path.startswith("/")
                 or self.remote_path.endswith("/")
                 or any(part in (".", "..") for part in self.remote_path.split("/"))

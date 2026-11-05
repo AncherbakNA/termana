@@ -1,8 +1,8 @@
-"""Remote protocol choices; RDP is session-only until its profile schema exists."""
+"""Implemented terminal, desktop and file-client choices in Sessions."""
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QSizePolicy, QWidget
+from PySide6.QtWidgets import QButtonGroup, QGridLayout, QSizePolicy, QWidget
 
 from termana.models.connection import ConnectionProtocol
 from termana.ui.i18n import tr
@@ -29,11 +29,16 @@ class ConnectionProtocolSelector(QWidget):
         description = tr("Choose SSH, Telnet or an RDP remote desktop.") if include_rdp else tr(
             "Choose encrypted SSH or unencrypted Telnet."
         )
+        self._values += ("sftp", "ftp", "tftp", "database")
+        self._labels += (tr("SFTP — SSH file transfer"), tr("FTP — file transfer"), tr("TFTP — file transfer"), tr("Database — SQL client"))
+        captions += (tr("SFTP"), tr("FTP"), tr("TFTP"), tr("Database"))
+        self._icons += ("folder", "folder", "file", "database")
+        description = tr("Choose a terminal, remote desktop, file-transfer or database connection.")
         self._index = 0
         self.buttons = []
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
-        layout = QHBoxLayout(self)
+        layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -52,7 +57,7 @@ class ConnectionProtocolSelector(QWidget):
             button.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             self._group.addButton(button, index)
             self.buttons.append(button)
-            layout.addWidget(button)
+            layout.addWidget(button, index // 3, index % 3)
         self.buttons[0].setChecked(True)
         self.setFocusProxy(self.buttons[0])
         self._group.idClicked.connect(self.setCurrentIndex)

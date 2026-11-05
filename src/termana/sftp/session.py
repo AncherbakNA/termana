@@ -163,6 +163,18 @@ class SftpRuntime:
             return await self._tree_transfer.run()
         if request.operation is SftpOperation.LIST:
             return await self._list(request)
+        if request.operation in (SftpOperation.DELETE_FILE, SftpOperation.REMOVE_DIRECTORY):
+            attrs = await self._remote_exists(request.remote_path)
+            directory = request.operation is SftpOperation.REMOVE_DIRECTORY
+            if attrs is None or not (
+                stat.S_ISDIR(attrs.permissions or 0) if directory
+                else stat.S_ISREG(attrs.permissions or 0)
+            ):
+                raise ValueError("The selected remote entry changed or is unsupported")
+            self._check_cancel(request)
+            action = self._client.rmdir if directory else self._client.remove
+            await self._io(action(request.remote_path))
+            return SftpResult(request.request_id, "ok", "Empty folder removed" if directory else "File deleted")
         if request.operation is SftpOperation.MKDIR:
             if await self._remote_exists(request.remote_path) is not None:
                 raise _AlreadyExists

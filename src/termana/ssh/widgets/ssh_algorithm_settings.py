@@ -21,6 +21,7 @@ class AlgorithmChoice(QWidget):
 
     def __init__(self, kind, label, selected, engine, *, discover=None, start=None, parent=None):
         super().__init__(parent)
+        self._kind, self._engine, self._custom_discover = kind, engine, discover
         self._automatic = (
             tr("Automatic (Embedded SSH)")
             if engine is SshEngine.EMBEDDED
@@ -131,6 +132,25 @@ class AlgorithmChoice(QWidget):
         if not self._attempted:
             self.refresh()
 
+    def set_engine(self, engine):
+        if engine is self._engine:
+            return
+        if type(engine) is not SshEngine:
+            raise ValueError("Unsupported SSH engine")
+        selected = self.selected
+        self._engine = engine
+        self._automatic = tr("Automatic (Embedded SSH)") if engine is SshEngine.EMBEDDED else tr("Automatic (OpenSSH / config)")
+        self._engine_label = "Embedded SSH" if engine is SshEngine.EMBEDDED else "OpenSSH"
+        self._discover = self._custom_discover or (lambda: discover_ssh_algorithms(self._kind, engine))
+        self._operation = self._operation_id = None
+        self._available = ()
+        self._attempted = False
+        self.refresh_button.setEnabled(True)
+        self._populate(",".join(selected) or self._automatic)
+        self._edited()
+        if self.isVisible():
+            self.refresh()
+
     @Slot()
     def refresh(self):
         if self._operation is not None:
@@ -223,6 +243,10 @@ class SshAlgorithmSettings(QWidget):
         return SshAlgorithms(
             self.kex_choice.selected, self.host_keys_choice.selected, self.protocol.currentData()
         )
+
+    def set_engine(self, engine):
+        for choice in (self.kex_choice, self.host_keys_choice):
+            choice.set_engine(engine)
 
     @property
     def selection_error(self):

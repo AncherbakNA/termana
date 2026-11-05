@@ -132,6 +132,8 @@ class SftpFileTools(QObject):
         self.browser._submit(request)
 
     def edit(self):
+        if "edit" not in getattr(self.browser, "_capabilities", {"edit"}):
+            return
         context = self.selection()
         if context is None:
             return

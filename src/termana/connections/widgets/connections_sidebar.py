@@ -3,7 +3,7 @@
 from typing import Final
 from uuid import UUID
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAccessible,
     QAccessibleEvent,
@@ -330,8 +330,8 @@ class ConnectionsSidebar(QFrame):
 
         self.setObjectName("connectionsSidebar")
         self.setAccessibleName(tr("Connections"))
-        # The outer rail owns the sidebar minimum; this page must fit the
-        # remaining viewport even with a large UI font and a visible scrollbar.
+        # The outer rail owns the default minimum; native/translated controls
+        # can require a little more width rather than being clipped inside it.
         self.setMinimumWidth(0)
 
         shell_layout = QVBoxLayout(self)
@@ -350,6 +350,11 @@ class ConnectionsSidebar(QFrame):
         layout = QVBoxLayout(sidebar_content)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(7)
+
+        self._sidebar_scroll = sidebar_scroll
+        self._sidebar_content = sidebar_content
+        self._content_width_pending = False
+        sidebar_content.installEventFilter(self)
 
         sidebar_scroll.setWidget(sidebar_content)
         shell_layout.addWidget(sidebar_scroll)
@@ -528,6 +533,26 @@ class ConnectionsSidebar(QFrame):
         self.clear_sessions_filter_shortcut.setAutoRepeat(False)
         self.clear_sessions_filter_shortcut.activated.connect(self._clear_sessions_filter)
         self.set_interface_colors(DEFAULT_THEME)
+        self._fit_scroll_content_width()
+
+    def eventFilter(self, watched, event):
+        if (watched is self._sidebar_content and event.type() == QEvent.Type.LayoutRequest
+                and not self._content_width_pending):
+            self._content_width_pending = True
+            QTimer.singleShot(0, self, self._fit_scroll_content_width)
+        return super().eventFilter(watched, event)
+
+    def _fit_scroll_content_width(self):
+        self._content_width_pending = False
+        layout = self._sidebar_content.layout()
+        layout.activate()
+        # Reserve the scrollbar regardless of its current visibility, avoiding
+        # resize/scrollbar oscillation. Tree labels remain elided, not a minimum.
+        width = (layout.minimumSize().width()
+                 + self._sidebar_scroll.verticalScrollBar().sizeHint().width()
+                 + 2 * self._sidebar_scroll.frameWidth())
+        if self.minimumWidth() != width:
+            self.setMinimumWidth(width)
 
     def set_interface_colors(self, colors: ThemeColors, *, monochrome: bool = False) -> None:
         """Cache a handful of tree glyphs; recolor rows without rebuilding catalog state."""
@@ -542,6 +567,10 @@ class ConnectionsSidebar(QFrame):
             "ssh": interface_icon("server", colors.text),
             "telnet": interface_icon("terminal", tones["terminal"]),
             "rdp": interface_icon("desktop", colors.text),
+            "sftp": interface_icon("folder", colors.text),
+            "ftp": interface_icon("folder", colors.text),
+            "tftp": interface_icon("file", colors.text),
+            "database": interface_icon("database", colors.text),
         }
         self._refresh_folder_icon(self._sessions_root)
         for item in self._items_by_folder_id.values():
@@ -554,7 +583,8 @@ class ConnectionsSidebar(QFrame):
         if profile.accent_color is None:
             return self._interface_icons[profile.protocol.value]
         glyph = {ConnectionProtocol.SSH: "server", ConnectionProtocol.TELNET: "terminal",
-                 ConnectionProtocol.RDP: "desktop"}[profile.protocol]
+                 ConnectionProtocol.RDP: "desktop", ConnectionProtocol.SFTP: "folder",
+                 ConnectionProtocol.FTP: "folder", ConnectionProtocol.TFTP: "file", ConnectionProtocol.DATABASE: "database"}[profile.protocol]
         key = (profile.protocol, profile.accent_color)
         icon = self._connection_color_icons.get(key)
         if icon is None:

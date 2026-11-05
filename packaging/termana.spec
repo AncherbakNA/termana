@@ -33,7 +33,7 @@ if (legacy_native / legacy_name).is_file():
     if sys.platform != 'darwin':
         datas += [(str(legacy_native / legacy_name), 'termana/legacy_helpers/' + legacy_native.name)]
     datas += [(str(legacy_area / 'PuTTY-LICENCE.txt'), 'termana/legacy_helpers')]
-for package in ('termana', 'asyncssh', 'cryptography', 'bcrypt', 'cffi', 'keyring', 'pyte', 'wcwidth', 'truststore',
+for package in ('termana', 'asyncssh', 'cryptography', 'bcrypt', 'cffi', 'keyring', 'pyte', 'wcwidth', 'truststore', 'tftpy', 'pg8000', 'PyMySQL', 'scramp', 'python-dateutil', 'tzdata', 'asn1crypto',
                 'PySide6', 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'typing_extensions',
                 'jaraco.classes', 'jaraco.context', 'jaraco.functools', 'more-itertools'):
     for source, target in copy_metadata(package):

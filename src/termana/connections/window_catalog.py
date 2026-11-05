@@ -48,6 +48,21 @@ def _open_connection(self: MainWindow, profile: object) -> _ConnectionOpenState:
             if self._open_telnet_connection(profile)
             else _ConnectionOpenState.REJECTED
         )
+    if profile.protocol in (ConnectionProtocol.SFTP, ConnectionProtocol.FTP, ConnectionProtocol.TFTP):
+        from termana.app.paths import known_hosts_file_path
+
+        if (self._close_waiting_for_terminals or
+                self._connection_catalog.profile_by_id(profile.profile_id) != profile):
+            return _ConnectionOpenState.REJECTED
+        page = self.terminal_workspace.open_file_session(
+            profile, known_hosts=self._embedded_ssh_known_hosts or known_hosts_file_path(),
+        )
+        return _ConnectionOpenState.ACCEPTED if page is not None else _ConnectionOpenState.REJECTED
+    if profile.protocol is ConnectionProtocol.DATABASE:
+        if self._close_waiting_for_terminals or self._connection_catalog.profile_by_id(profile.profile_id) != profile:
+            return _ConnectionOpenState.REJECTED
+        page = self.terminal_workspace.open_database_session(profile)
+        return _ConnectionOpenState.ACCEPTED if page is not None else _ConnectionOpenState.REJECTED
     if profile.protocol is ConnectionProtocol.RDP:
         from termana.rdp.ui import open_saved_rdp_profile
 

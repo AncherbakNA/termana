@@ -11,6 +11,8 @@ from types import MappingProxyType
 from typing import Final
 from uuid import UUID, uuid4
 
+from termana.models.database_options import DEFAULT_DATABASE_OPTIONS, DatabaseOptions
+from termana.models.file_options import DEFAULT_FILE_OPTIONS, FileOptions
 from termana.models.rdp_options import DEFAULT_RDP_OPTIONS, RdpOptions
 from termana.models.ssh_algorithms import DEFAULT_SSH_ALGORITHMS, SshAlgorithms
 from termana.models.ssh_cipher import validate_ssh_cipher
@@ -22,6 +24,7 @@ from termana.models.ssh_tunnels import SshTunnelOptions
 _DEFAULT_SSH_OPTIONS: Final = SshConnectionOptions()
 _DEFAULT_SSH_IDENTITY: Final = SshIdentityOptions()
 _DEFAULT_SSH_JUMP: Final = SshJumpOptions()
+_UNSET_SSH_JUMP: Final = object()
 _DEFAULT_SSH_TUNNELS: Final = SshTunnelOptions()
 MIN_NETWORK_PORT: Final = 1
 MAX_NETWORK_PORT: Final = 65535
@@ -50,6 +53,10 @@ class ConnectionProtocol(StrEnum):
     SSH = "ssh"
     TELNET = "telnet"
     RDP = "rdp"
+    SFTP = "sftp"
+    FTP = "ftp"
+    TFTP = "tftp"
+    DATABASE = "database"
 
 
 class TelnetEncoding(StrEnum):
@@ -74,6 +81,10 @@ _DEFAULT_PORTS_BY_PROTOCOL: Final[Mapping[ConnectionProtocol, int]] = MappingPro
         ConnectionProtocol.SSH: DEFAULT_SSH_PORT,
         ConnectionProtocol.TELNET: DEFAULT_TELNET_PORT,
         ConnectionProtocol.RDP: DEFAULT_RDP_PORT,
+        ConnectionProtocol.SFTP: 22,
+        ConnectionProtocol.FTP: 21,
+        ConnectionProtocol.TFTP: 69,
+        ConnectionProtocol.DATABASE: 5432,
     }
 )
 
@@ -104,6 +115,8 @@ class ConnectionProfile:
     ssh_tunnels: SshTunnelOptions = _DEFAULT_SSH_TUNNELS
     ssh_algorithms: SshAlgorithms = DEFAULT_SSH_ALGORITHMS
     ssh_account_id: UUID | None = None
+    file_options: FileOptions = DEFAULT_FILE_OPTIONS
+    database_options: DatabaseOptions = DEFAULT_DATABASE_OPTIONS
     rdp_options: RdpOptions = DEFAULT_RDP_OPTIONS
     word_delete_mode: WordDeleteMode = WordDeleteMode.ESCAPE_DEL
     accent_color: str | None = None
@@ -121,10 +134,12 @@ class ConnectionProfile:
         ssh_options: SshConnectionOptions = _DEFAULT_SSH_OPTIONS,
         is_favorite: bool = False,
         ssh_identity: SshIdentityOptions = _DEFAULT_SSH_IDENTITY,
-        ssh_jump: SshJumpOptions = _DEFAULT_SSH_JUMP,
+        ssh_jump: SshJumpOptions | object = _UNSET_SSH_JUMP,
         ssh_tunnels: SshTunnelOptions = _DEFAULT_SSH_TUNNELS,
         ssh_algorithms: SshAlgorithms = DEFAULT_SSH_ALGORITHMS,
         ssh_account_id: UUID | None = None,
+        file_options: FileOptions = DEFAULT_FILE_OPTIONS,
+        database_options: DatabaseOptions = DEFAULT_DATABASE_OPTIONS,
         rdp_options: RdpOptions = DEFAULT_RDP_OPTIONS,
         word_delete_mode: WordDeleteMode = WordDeleteMode.ESCAPE_DEL,
         accent_color: str | None = None,
@@ -135,6 +150,9 @@ class ConnectionProfile:
             if port is None and isinstance(protocol, ConnectionProtocol)
             else port
         )
+        if (port is None and protocol is ConnectionProtocol.DATABASE
+                and type(database_options) is DatabaseOptions and database_options.engine == "mysql"):
+            resolved_port = 3306
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "host", host)
         object.__setattr__(self, "protocol", protocol)
@@ -145,10 +163,15 @@ class ConnectionProfile:
         object.__setattr__(self, "ssh_options", ssh_options)
         object.__setattr__(self, "is_favorite", is_favorite)
         object.__setattr__(self, "ssh_identity", ssh_identity)
+        if ssh_jump is _UNSET_SSH_JUMP:
+            ssh_jump = (SshJumpOptions(SshJumpMode.DIRECT)
+                        if protocol is ConnectionProtocol.SFTP else _DEFAULT_SSH_JUMP)
         object.__setattr__(self, "ssh_jump", ssh_jump)
         object.__setattr__(self, "ssh_tunnels", ssh_tunnels)
         object.__setattr__(self, "ssh_algorithms", ssh_algorithms)
         object.__setattr__(self, "ssh_account_id", ssh_account_id)
+        object.__setattr__(self, "file_options", file_options)
+        object.__setattr__(self, "database_options", database_options)
         object.__setattr__(self, "rdp_options", rdp_options)
         object.__setattr__(self, "word_delete_mode", word_delete_mode)
         object.__setattr__(self, "accent_color", accent_color.upper() if isinstance(accent_color, str) else accent_color)
@@ -187,6 +210,22 @@ class ConnectionProfile:
             raise ValueError("Unsupported word deletion mode")
         if self.protocol is ConnectionProtocol.RDP and self.word_delete_mode is not WordDeleteMode.ESCAPE_DEL:
             raise ValueError("RDP profiles cannot select terminal word deletion")
+        if type(self.file_options) is not FileOptions:
+            raise ValueError("File options must be FileOptions")
+        if type(self.database_options) is not DatabaseOptions:
+            raise ValueError("Database options must be DatabaseOptions")
+        if self.protocol is not ConnectionProtocol.DATABASE and not self.database_options.is_default:
+            raise ValueError("Only database profiles can select database options")
+        if self.protocol not in (ConnectionProtocol.FTP, ConnectionProtocol.TFTP) and not self.file_options.is_default:
+            raise ValueError("Only FTP/TFTP profiles can select file-client options")
+        if self.protocol is ConnectionProtocol.FTP and (
+            self.file_options.tftp_block_size != 512 or self.file_options.tftp_retries != 3
+        ):
+            raise ValueError("FTP profiles cannot select TFTP options")
+        if self.protocol is ConnectionProtocol.TFTP and (
+            self.file_options.ftp_security != "plain" or self.file_options.ftp_encoding != "utf-8"
+        ):
+            raise ValueError("TFTP profiles cannot select FTP options")
         if type(self.rdp_options) is not RdpOptions:
             raise ValueError("RDP options must be RdpOptions")
         if self.protocol is not ConnectionProtocol.RDP and not self.rdp_options.is_default:
@@ -232,6 +271,18 @@ class ConnectionProfile:
             or not self.ssh_tunnels.is_default
         ):
             raise ValueError("RDP profiles cannot select SSH settings or accounts")
+        if self.protocol in (ConnectionProtocol.FTP, ConnectionProtocol.TFTP, ConnectionProtocol.DATABASE) and (
+            self.ssh_cipher is not None or self.ssh_account_id is not None
+            or not self.ssh_algorithms.is_default or not self.ssh_options.is_default
+            or not self.ssh_identity.is_default or not self.ssh_jump.is_default
+            or not self.ssh_tunnels.is_default
+        ):
+            raise ValueError("FTP/TFTP/database profiles cannot select SSH settings or accounts")
+        if self.protocol is ConnectionProtocol.SFTP and (
+            self.ssh_algorithms.protocol == "1" or not self.ssh_tunnels.is_default
+            or self.ssh_account_id is not None or self.ssh_jump.mode is SshJumpMode.CONFIG
+        ):
+            raise ValueError("SFTP requires SSH2 without terminal tunnels or saved SSH accounts")
         if self.ssh_jump.mode is SshJumpMode.JUMP:
             validate_ssh_route_host(self.host)
         if isinstance(self.port, bool) or not isinstance(self.port, int):
@@ -252,7 +303,7 @@ class ConnectionProfile:
                 self.username,
                 field_name="Username",
                 maximum_length=MAX_CONNECTION_USERNAME_CHARACTERS,
-                forbid_whitespace=True,
+                forbid_whitespace=self.protocol is not ConnectionProtocol.FTP,
             )
         if not isinstance(self.profile_id, UUID):
             raise ValueError("Connection profile ID must be a UUID")

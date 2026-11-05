@@ -392,7 +392,11 @@ def ssh_controls_styles(colors: ThemeColors) -> str:
 
         QToolButton#connectionType_ssh,
         QToolButton#connectionType_telnet,
-        QToolButton#connectionType_rdp {{
+        QToolButton#connectionType_rdp,
+        QToolButton#connectionType_sftp,
+        QToolButton#connectionType_ftp,
+        QToolButton#connectionType_tftp,
+        QToolButton#connectionType_database {{
             min-width: 58px;
             padding: 7px 9px;
             border: 1px solid transparent;
@@ -402,20 +406,32 @@ def ssh_controls_styles(colors: ThemeColors) -> str:
 
         QToolButton#connectionType_ssh:hover,
         QToolButton#connectionType_telnet:hover,
-        QToolButton#connectionType_rdp:hover {{
+        QToolButton#connectionType_rdp:hover,
+        QToolButton#connectionType_sftp:hover,
+        QToolButton#connectionType_ftp:hover,
+        QToolButton#connectionType_tftp:hover,
+        QToolButton#connectionType_database:hover {{
             background-color: {colors.raised};
         }}
 
         QToolButton#connectionType_ssh:checked,
         QToolButton#connectionType_telnet:checked,
-        QToolButton#connectionType_rdp:checked {{
+        QToolButton#connectionType_rdp:checked,
+        QToolButton#connectionType_sftp:checked,
+        QToolButton#connectionType_ftp:checked,
+        QToolButton#connectionType_tftp:checked,
+        QToolButton#connectionType_database:checked {{
             background-color: {colors.raised};
             border-color: {colors.accent};
         }}
 
         QToolButton#connectionType_ssh:focus:!checked,
         QToolButton#connectionType_telnet:focus:!checked,
-        QToolButton#connectionType_rdp:focus:!checked {{
+        QToolButton#connectionType_rdp:focus:!checked,
+        QToolButton#connectionType_sftp:focus:!checked,
+        QToolButton#connectionType_ftp:focus:!checked,
+        QToolButton#connectionType_tftp:focus:!checked,
+        QToolButton#connectionType_database:focus:!checked {{
             border: 1px dotted {colors.accent};
         }}
 

@@ -48,8 +48,8 @@ class CommandSnippetsSidebar(QWidget):
             tr("Every line break sends Enter, including a final line break.")
         )
         self.manage_button = QPushButton(tr("Manage…"))
-        for button in (self.insert_button, self.manage_button):
-            button.setProperty("actionRole", "secondary")
+        self.insert_button.setProperty("actionRole", "primary")
+        self.manage_button.setProperty("actionRole", "secondary")
         for widget in (self.search, self.notice, self.items, self.preview):
             layout.addWidget(widget, 1 if widget is self.items else 0)
         layout.addWidget(AdaptiveButtonRow((self.insert_button, self.manage_button)))

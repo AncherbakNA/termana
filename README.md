@@ -1,7 +1,7 @@
 # Termana
 
-A desktop workspace for SSH, SFTP, Telnet and RDP, with local terminals and
-saved connections in one window.
+A desktop workspace for terminals, remote desktops, file transfers and SQL,
+with saved connections in one window.
 
 [Download releases](https://github.com/AncherbakNA/termana/releases)
 · [Source code](https://github.com/AncherbakNA/termana)
@@ -10,8 +10,8 @@ saved connections in one window.
 ## Current status
 
 Termana is in active development. Versions `0.x.y` are early releases, not a
-production-readiness guarantee. Version `v0.1.2` adds quiet update checks,
-system HTTPS trust and a choice of encrypted or readable personal GitHub sync.
+production-readiness guarantee. Version `v0.1.3` adds standalone file clients
+and an initial SQL workspace alongside GitHub updates and personal sync.
 
 ## Features
 
@@ -20,6 +20,9 @@ system HTTPS trust and a choice of encrypted or readable personal GitHub sync.
 - Terminal tabs and split panes, including moving tabs between panes.
 - Local terminals with a choice of shell and starting directory.
 - Remote file browsing, transfers and text editing over SFTP.
+- Standalone SFTP, FTP/explicit FTPS and named-file TFTP sessions.
+- PostgreSQL, MySQL/MariaDB and SQLite profiles, object browsing, SQL results
+  and explicit transactions. Read-only defaults do not replace server permissions.
 - Embedded RDP desktop with keyboard and mouse input, display resizing,
   administrative sessions and separately enabled clipboard directions.
 - Command snippets, terminal search, output saving and session logging.
@@ -64,6 +67,13 @@ after startup and every six hours; this can be disabled in the update window.
 Installation always requires your action. If an older client's check or installer
 fails, download and replace the complete application manually once; keep your data.
 Source launches and Linux installations update manually from source.
+
+Version 0.1.3 saves a newer connection format. Keep its migration backup and
+update all devices before syncing catalogs containing file or database profiles;
+older clients reject these catalogs instead of discarding unknown profiles.
+Failed-start rollback restores the pre-update configuration and preserves the
+failed version's data separately. For a later manual downgrade, restore a
+matching configuration backup rather than deleting the newer catalog.
 
 ## Personal GitHub sync
 

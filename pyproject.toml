@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "termana"
-version = "0.1.2"
+version = "0.1.3"
 description = "A cross-platform terminal application"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,6 +18,10 @@ dependencies = [
     "pyte>=0.8.2,<0.9",
     # HTTPS uses OS trust, not a developer machine's external CA bundle.
     "truststore==0.10.5",
+    # Named-file TFTP transfers; no protocol implementation in Termana.
+    "tftpy==0.8.7",
+    "pg8000==1.31.6",
+    "PyMySQL[rsa]==1.2.3",
     "wcwidth>=0.2.13,<1",
 ]
 
@@ -27,6 +31,8 @@ embedded-ssh = []
 dev = [
     "build>=1.2,<2",
     "pytest>=8.4",
+    # Disposable loopback FTP/FTPS peers, never required by the application.
+    "pyftpdlib[ssl]==2.2.0",
     "ruff>=0.12",
 ]
 
